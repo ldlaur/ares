@@ -59,11 +59,11 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-/rarsjs
-/rarsjs_test
-/rarsjs_afl
-/rarsjs_libfuzzer
-/rarsjs_test
+/ares
+/ares_test
+/ares_afl
+/ares_libfuzzer
+/ares_test
 /*.profdata
 /*.profraw
 /.vercel

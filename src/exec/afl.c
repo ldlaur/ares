@@ -1,5 +1,5 @@
 #include <unistd.h>
-#include "rarsjs/core.h"
+#include "ares/core.h"
 
 __AFL_FUZZ_INIT();
 

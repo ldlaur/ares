@@ -1,6 +1,6 @@
-#include "rarsjs/dev.h"
+#include "ares/dev.h"
 
-#include "rarsjs/emulate.h"
+#include "ares/emulate.h"
 
 #define MMIO_OP_READ 0
 #define MMIO_OP_WRITE 1
@@ -152,7 +152,7 @@ bool mmio_read(u32 mmio_addr, int size, u32 *ret) {
         return false;
     }
 
-    return rarsjs_buf_read(buf, size, ret);
+    return ares_buf_read(buf, size, ret);
 }
 
 bool mmio_write(u32 mmio_addr, int size, u32 value) {
@@ -165,7 +165,7 @@ bool mmio_write(u32 mmio_addr, int size, u32 value) {
     Device *dev = &g_mmio_devices[dev_num];
     u8 *buf = dev->buffer;
     u32 off = mmio_addr - (dev_num * MMIO_DEVICE_RSV);
-    if (!rarsjs_buf_write(buf + off, size, value)) {
+    if (!ares_buf_write(buf + off, size, value)) {
         return false;
     }
 

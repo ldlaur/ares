@@ -20,7 +20,7 @@ typedef struct {
     u32 reg_bitmap;
 } ShadowStackEnt;
 
-RARSJS_ARRAY_TYPE(ShadowStackEnt);
+ARES_ARRAY_TYPE(ShadowStackEnt);
 
 void callsan_init();
 void callsan_store(int reg);
@@ -31,5 +31,5 @@ void callsan_report_store(u32 addr, u32 size, int reg);
 bool callsan_check_load(u32 addr, u32 size);
 
 extern u32 g_reg_bitmap;
-extern RARSJS_ARRAY(ShadowStackEnt) g_shadow_stack;
+extern ARES_ARRAY(ShadowStackEnt) g_shadow_stack;
 extern u8 g_callsan_stack_written_by[];

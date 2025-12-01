@@ -69,8 +69,8 @@ static inline void shadowstack_pop() {}
 #define STATUS_FS_MASK (0b11<<13)
 
 
-RARSJS_ARRAY_TYPE(u8);
-RARSJS_ARRAY_TYPE(u32);
+ARES_ARRAY_TYPE(u8);
+ARES_ARRAY_TYPE(u32);
 
 typedef struct Parser {
     const char *input;
@@ -96,7 +96,7 @@ typedef struct {
     size_t type;
 } Relocation;
 
-RARSJS_ARRAY_TYPE(Relocation);
+ARES_ARRAY_TYPE(Relocation);
 
 // It would be preferable not to use dedicated pointer types like SectionPtr,
 // since it is more idiomatic. However, the C preprocessor is limited in this
@@ -105,10 +105,10 @@ typedef struct Section {
     const char *name;
     u32 base;
     u32 limit;
-    RARSJS_ARRAY(u8) contents;
+    ARES_ARRAY(u8) contents;
     size_t emit_idx;
     u32 align;
-    RARSJS_ARRAY(Relocation) relocations;
+    ARES_ARRAY(Relocation) relocations;
     struct {
         size_t shidx;
     } elf;
@@ -164,12 +164,12 @@ typedef enum Error : u32 {
     ERROR_DOUBLE = 12
 } Error;
 
-RARSJS_ARRAY_TYPE(SectionPtr);
-RARSJS_ARRAY_TYPE(LabelData);
-RARSJS_ARRAY_TYPE(Global);
-RARSJS_ARRAY_TYPE(Extern);
-RARSJS_ARRAY_TYPE(DeferredInsn);
-RARSJS_ARRAY_TYPE(char);
+ARES_ARRAY_TYPE(SectionPtr);
+ARES_ARRAY_TYPE(LabelData);
+ARES_ARRAY_TYPE(Global);
+ARES_ARRAY_TYPE(Extern);
+ARES_ARRAY_TYPE(DeferredInsn);
+ARES_ARRAY_TYPE(char);
 
 extern export Section *g_text;
 extern export Section *g_data;
@@ -178,11 +178,11 @@ extern export Section *g_kernel_data;
 extern export Section *g_kernel_text;
 extern export Section *g_mmio;
 
-extern RARSJS_ARRAY(SectionPtr) g_sections;
-extern RARSJS_ARRAY(LabelData) g_labels;
-extern RARSJS_ARRAY(Global) g_globals;
-extern RARSJS_ARRAY(Extern) g_externs;
-extern export RARSJS_ARRAY(u32) g_text_by_linenum;
+extern ARES_ARRAY(SectionPtr) g_sections;
+extern ARES_ARRAY(LabelData) g_labels;
+extern ARES_ARRAY(Global) g_globals;
+extern ARES_ARRAY(Extern) g_externs;
+extern export ARES_ARRAY(u32) g_text_by_linenum;
 
 extern export u32 g_error_line;
 extern export const char *g_error;

@@ -1,4 +1,4 @@
-#include "rarsjs/elf.h"
+#include "ares/elf.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -6,9 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rarsjs/core.h"
-#include "rarsjs/emulate.h"
-#include "rarsjs/util.h"
+#include "ares/core.h"
+#include "ares/emulate.h"
+#include "ares/util.h"
 
 // TODO: if the host machine and RISC-V have mismatched byte orders (i.e., the
 // host is big endian, as is the case for SPARC and other defunct
@@ -119,7 +119,7 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
     ElfProgramHeader *phdrs =
         (ElfProgramHeader *)(elf_contents + e_header->phdrs_off);
     readable_phdrs = malloc(sizeof(ReadElfSegment) * e_header->phent_num);
-    RARSJS_CHECK_OOM(readable_phdrs);
+    ARES_CHECK_OOM(readable_phdrs);
 
     for (u32 i = 0; i < e_header->phent_num; i++) {
         ElfProgramHeader *phdr = &phdrs[i];
@@ -179,7 +179,7 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
     ElfSectionHeader *shdrs =
         (ElfSectionHeader *)(elf_contents + e_header->shdrs_off);
     readable_shdrs = malloc(sizeof(ReadElfSection) * e_header->shent_num);
-    RARSJS_CHECK_OOM(readable_shdrs);
+    ARES_CHECK_OOM(readable_shdrs);
 
     ElfSectionHeader *str_sh = &shdrs[e_header->shdr_str_idx];
     char *str_tab = (char *)(elf_contents + str_sh->off);
@@ -275,8 +275,8 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
     size_t segments_count = 0;
     size_t segments_sz = 0;
     size_t reloc_shdrs_num = 0;
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *s = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *s = *ARES_ARRAY_GET(&g_sections, i);
         if (s->physical && 0 != s->contents.len) {
             segments_count++;
             segments_sz += s->contents.len;
@@ -299,7 +299,7 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
     }
 
     u8 *region = malloc(region_sz);
-    RARSJS_CHECK_OOM(region);
+    ARES_CHECK_OOM(region);
 
     size_t phdrs_off = 0;
     size_t segment_off = 0;
@@ -345,8 +345,8 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
 
     // Write program headers, segments, and section headers
     // RELOCATION HEADERS EXCLUDED
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *s = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *s = *ARES_ARRAY_GET(&g_sections, i);
         if (!s->physical || 0 == s->contents.len) {
             continue;
         }
@@ -437,8 +437,8 @@ static bool make_strtab(char **out, size_t *out_sz, bool inc_externs,
                         bool inc_globs, char **error) {
     size_t base_len = strlen(".strtab") + 1 + strlen(".symtab") + 1;
     size_t strtab_sz = 1 + base_len;
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *s = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *s = *ARES_ARRAY_GET(&g_sections, i);
         if (s->physical && 0 != s->contents.len) {
             strtab_sz += strlen(s->name) + 1;
 
@@ -448,28 +448,28 @@ static bool make_strtab(char **out, size_t *out_sz, bool inc_externs,
         }
     }
     if (inc_externs) {
-        for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_externs); i++) {
-            Extern *e = RARSJS_ARRAY_GET(&g_externs, i);
+        for (size_t i = 0; i < ARES_ARRAY_LEN(&g_externs); i++) {
+            Extern *e = ARES_ARRAY_GET(&g_externs, i);
             strtab_sz += e->len + 1;
         }
     }
     if (inc_globs) {
-        for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_globals); i++) {
-            Global *g = RARSJS_ARRAY_GET(&g_globals, i);
+        for (size_t i = 0; i < ARES_ARRAY_LEN(&g_globals); i++) {
+            Global *g = ARES_ARRAY_GET(&g_globals, i);
             strtab_sz += g->len + 1;
         }
     }
 
     char *strtab = malloc(strtab_sz);
-    RARSJS_CHECK_OOM(strtab);
+    ARES_CHECK_OOM(strtab);
 
     strtab[0] = '\0';
     size_t strtab_off = 1;
 
     copy_s(strtab, ".strtab", &strtab_off);
     copy_s(strtab, ".symtab", &strtab_off);
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *s = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *s = *ARES_ARRAY_GET(&g_sections, i);
         if (s->physical && 0 != s->contents.len) {
             copy_s(strtab, s->name, &strtab_off);
 
@@ -482,16 +482,16 @@ static bool make_strtab(char **out, size_t *out_sz, bool inc_externs,
     }
 
     if (inc_externs) {
-        for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_externs); i++) {
-            Extern *e = RARSJS_ARRAY_GET(&g_externs, i);
+        for (size_t i = 0; i < ARES_ARRAY_LEN(&g_externs); i++) {
+            Extern *e = ARES_ARRAY_GET(&g_externs, i);
             copy_n(strtab, e->symbol, e->len, &strtab_off);
             strtab[strtab_off++] = '\0';
         }
     }
 
     if (inc_globs) {
-        for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_globals); i++) {
-            Global *g = RARSJS_ARRAY_GET(&g_globals, i);
+        for (size_t i = 0; i < ARES_ARRAY_LEN(&g_globals); i++) {
+            Global *g = ARES_ARRAY_GET(&g_globals, i);
             copy_n(strtab, g->str, g->len, &strtab_off);
             strtab[strtab_off++] = '\0';
         }
@@ -510,9 +510,9 @@ static bool make_symtab(u8 **out, size_t *out_sz, size_t *ent_num,
                         size_t name_off, char **error) {
     size_t symtab_sz =
         sizeof(ElfSymtabEntry) *
-        (1 + RARSJS_ARRAY_LEN(&g_externs) + RARSJS_ARRAY_LEN(&g_globals));
+        (1 + ARES_ARRAY_LEN(&g_externs) + ARES_ARRAY_LEN(&g_globals));
     ElfSymtabEntry *symtab = malloc(symtab_sz);
-    RARSJS_CHECK_OOM(symtab);
+    ARES_CHECK_OOM(symtab);
 
     ElfSymtabEntry null_e = {0};
     null_e.shent_idx = SHN_UNDEF;
@@ -520,8 +520,8 @@ static bool make_symtab(u8 **out, size_t *out_sz, size_t *ent_num,
 
     size_t symtab_i = 1;
 
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_externs); i++, symtab_i++) {
-        Extern *e = RARSJS_ARRAY_GET(&g_externs, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_externs); i++, symtab_i++) {
+        Extern *e = ARES_ARRAY_GET(&g_externs, i);
         ElfSymtabEntry *sym = &symtab[symtab_i];
         e->elf.stidx = symtab_i;
         sym->name_off = name_off;
@@ -533,8 +533,8 @@ static bool make_symtab(u8 **out, size_t *out_sz, size_t *ent_num,
         name_off += e->len + 1;
     }
 
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_globals); i++, symtab_i++) {
-        Global *g = RARSJS_ARRAY_GET(&g_globals, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_globals); i++, symtab_i++) {
+        Global *g = ARES_ARRAY_GET(&g_globals, i);
         ElfSymtabEntry *sym = &symtab[symtab_i];
         g->elf.stidx = symtab_i;
         sym->name_off = name_off;
@@ -570,13 +570,13 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
                       ElfSectionHeader *shdrs, size_t reloc_idx,
                       ElfSymtabEntry *symtab, char **error) {
     size_t rela_count = 0;
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *s = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *s = *ARES_ARRAY_GET(&g_sections, i);
         rela_count += s->relocations.len;
     }
 
     ElfRelaEntry *relas = malloc(sizeof(ElfRelaEntry) * rela_count);
-    RARSJS_CHECK_OOM(relas);
+    ARES_CHECK_OOM(relas);
 
     // NOTE: this works because it assumes that section headers have been palced
     // by the make_core function. The make_core function places section headers
@@ -585,8 +585,8 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
     // starting at index reloc_idx and are placed in the same order (excluding
     // sections that do not require relocations)
     size_t rel_i = 0;
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *s = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *s = *ARES_ARRAY_GET(&g_sections, i);
         if (!s->physical || 0 == s->contents.len || 0 == s->relocations.len) {
             continue;
         }
@@ -634,9 +634,9 @@ bool elf_emit_exec(void **out, size_t *len, char **error) {
         return false;
     }
 
-    RARSJS_CHECK_CALL(make_strtab(&strtab, &strtab_sz, true, true, error),
+    ARES_CHECK_CALL(make_strtab(&strtab, &strtab_sz, true, true, error),
                       fail);
-    RARSJS_CHECK_CALL(make_core(&core, &core_sz, &name_off, &phdrs_start,
+    ARES_CHECK_CALL(make_core(&core, &core_sz, &name_off, &phdrs_start,
                                 &shdrs_start, &phnum, &shnum, NULL, NULL,
                                 sizeof(ElfHeader), 1, 0, true, true, error),
                       fail);
@@ -676,7 +676,7 @@ bool elf_emit_exec(void **out, size_t *len, char **error) {
                                   .ent_sz = 0};
 
     elf_contents = malloc(sizeof(ElfHeader) + core_sz + strtab_sz);
-    RARSJS_CHECK_OOM(elf_contents);
+    ARES_CHECK_OOM(elf_contents);
     size_t elf_off = 0;
 
     copy_n(elf_contents, &e_hdr, sizeof(e_hdr), &elf_off);
@@ -716,19 +716,19 @@ bool elf_emit_obj(void **out, size_t *len, char **error) {
     size_t symtab_entnum = 0;
     size_t relas_sz = 0;
 
-    RARSJS_CHECK_CALL(make_strtab(&strtab, &strtab_sz, true, true, error),
+    ARES_CHECK_CALL(make_strtab(&strtab, &strtab_sz, true, true, error),
                       fail);
-    RARSJS_CHECK_CALL(
+    ARES_CHECK_CALL(
         make_core(&core, &core_sz, &name_off, &phdrs_start, &shdrs_start,
                   &phnum, &shnum, &reloc_idx, &reloc_num, sizeof(ElfHeader), 2,
                   2, false, true, error),
         fail);
-    RARSJS_CHECK_CALL(
+    ARES_CHECK_CALL(
         make_symtab(&symtab, &symtab_sz, &symtab_entnum, name_off, error),
         fail);
 
     ElfSectionHeader *shdrs = (ElfSectionHeader *)(core + shdrs_start);
-    RARSJS_CHECK_CALL(
+    ARES_CHECK_CALL(
         make_rela(&relas, &relas_sz,
                   sizeof(ElfHeader) + core_sz + strtab_sz + symtab_sz, shdrs,
                   reloc_idx, (ElfSymtabEntry *)symtab, error),
@@ -778,7 +778,7 @@ bool elf_emit_obj(void **out, size_t *len, char **error) {
 
     elf_contents =
         malloc(sizeof(ElfHeader) + core_sz + strtab_sz + symtab_sz + relas_sz);
-    RARSJS_CHECK_OOM(elf_contents);
+    ARES_CHECK_OOM(elf_contents);
     size_t elf_off = 0;
 
     copy_n(elf_contents, &e_hdr, sizeof(e_hdr), &elf_off);
@@ -855,13 +855,13 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
         }
 
         Section *s = calloc(1, sizeof(Section));
-        RARSJS_CHECK_OOM(s);
+        ARES_CHECK_OOM(s);
         s->read = true;
         s->align = s_hdr->align;
         s->base = s_hdr->virt_addr;
         s->contents.cap = s->contents.len = s_hdr->mem_sz;
         s->contents.buf = malloc(s->contents.len);
-        RARSJS_CHECK_OOM(s->contents.buf);
+        ARES_CHECK_OOM(s->contents.buf);
         memcpy(s->contents.buf, elf_contents + s_hdr->off, s->contents.len);
         s->limit = s->base + s->contents.len;
 
@@ -881,7 +881,7 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
             s->execute = true;
         }
 
-        *RARSJS_ARRAY_PUSH(&g_sections) = s;
+        *ARES_ARRAY_PUSH(&g_sections) = s;
     }
 
     emulator_init();
@@ -889,9 +889,9 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
     return true;
 
 fail:
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        free(*RARSJS_ARRAY_GET(&g_sections, i));
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        free(*ARES_ARRAY_GET(&g_sections, i));
     }
-    RARSJS_ARRAY_FREE(&g_sections);
+    ARES_ARRAY_FREE(&g_sections);
     return false;
 }

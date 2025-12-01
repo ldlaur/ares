@@ -7,11 +7,11 @@
 
 #include "ezld/include/ezld/linker.h"
 #include "ezld/include/ezld/runtime.h"
-#include "rarsjs/callsan.h"
-#include "rarsjs/core.h"
-#include "rarsjs/elf.h"
-#include "rarsjs/emulate.h"
-#include "rarsjs/util.h"
+#include "ares/callsan.h"
+#include "ares/core.h"
+#include "ares/elf.h"
+#include "ares/emulate.h"
+#include "ares/util.h"
 #include "vendor/commander.h"
 
 // Type of command handler functions (c_*)
@@ -54,7 +54,7 @@ static void update_argument(const char *arg) {
 
     if (arg) {
         g_next_arg = strdup(arg);
-        RARSJS_CHECK_OOM(g_next_arg);
+        ARES_CHECK_OOM(g_next_arg);
     }
 }
 
@@ -154,9 +154,9 @@ err:
     }
 
     puts("");
-    puts("===================== RARSJS SANITIZER ERROR");
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_shadow_stack); i++) {
-        ShadowStackEnt *ent = RARSJS_ARRAY_GET(&g_shadow_stack, i);
+    puts("===================== ARES SANITIZER ERROR");
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_shadow_stack); i++) {
+        ShadowStackEnt *ent = ARES_ARRAY_GET(&g_shadow_stack, i);
         fprintf(stderr, "\t#%zu pc=0x%08x sp=0x%08x ", i, ent->pc, ent->sp);
         LabelData *label;
         u32 off;
@@ -166,8 +166,8 @@ err:
             fprintf(stderr, "(at %.*s+0x%x", (int)label->len, label->txt, off);
             size_t line_idx = (ent->pc - TEXT_BASE) / 4;
 
-            if (line_idx < RARSJS_ARRAY_LEN(&g_text_by_linenum)) {
-                u32 linenum = *RARSJS_ARRAY_GET(&g_text_by_linenum, line_idx);
+            if (line_idx < ARES_ARRAY_LEN(&g_text_by_linenum)) {
+                u32 linenum = *ARES_ARRAY_GET(&g_text_by_linenum, line_idx);
                 fprintf(stderr, ", line %u)", linenum);
             } else {
                 fprintf(stderr, ")");
@@ -201,7 +201,7 @@ static void assemble_from_file(const char *src_path, bool allow_externs) {
     size_t s = ftell(f);
     rewind(f);
     g_txt = malloc(s);
-    RARSJS_CHECK_OOM(g_txt);
+    ARES_CHECK_OOM(g_txt);
     fread(g_txt, s, 1, f);
     fclose(f);
 
@@ -262,11 +262,11 @@ static void c_run(void) {
     rewind(elf);
 
     elf_contents = malloc(sz);
-    RARSJS_CHECK_OOM(elf_contents);
+    ARES_CHECK_OOM(elf_contents);
 
     fread(elf_contents, sz, 1, elf);
 
-    RARSJS_CHECK_CALL(elf_load(elf_contents, sz, &error), exit);
+    ARES_CHECK_CALL(elf_load(elf_contents, sz, &error), exit);
 
     emulate_safe();
 
@@ -304,11 +304,11 @@ static void c_readelf(void) {
     rewind(elf);
 
     elf_contents = malloc(sz);
-    RARSJS_CHECK_OOM(elf_contents);
+    ARES_CHECK_OOM(elf_contents);
 
     fread(elf_contents, sz, 1, elf);
     ReadElfResult readelf = {0};
-    RARSJS_CHECK_CALL(elf_read(elf_contents, sz, &readelf, &error), exit);
+    ARES_CHECK_CALL(elf_read(elf_contents, sz, &readelf, &error), exit);
 
     printf(" %-35s:", "Magic");
     for (size_t i = 0; i < 8; i++) {
@@ -548,7 +548,7 @@ static void opt_readelf(command_t *self) {
 
 static void opt_o(command_t *self) {
     g_obj_out = malloc(strlen(self->arg) + 1);
-    RARSJS_CHECK_OOM(g_obj_out);
+    ARES_CHECK_OOM(g_obj_out);
     strcpy(g_obj_out, self->arg);
     g_exec_out = g_obj_out;
     g_out_changed = true;
@@ -606,7 +606,7 @@ int main(int argc, char **argv) {
     command_option(&cmd, "-o", "--output <file>", "choose output file name",
                    opt_o);
     command_option(&cmd, "-s", "--sanitize",
-                   "enable rarsjs sanitizers (callsan)", opt_sanitize);
+                   "enable ares sanitizers (callsan)", opt_sanitize);
     command_parse(&cmd, argc, argv);
     g_cmd_args = (const char **)cmd.argv;
     g_cmd_args_len = cmd.argc;

@@ -235,7 +235,7 @@ const Navbar: Component = () => {
 			<div class="mx-auto px-2">
 				<div class="flex items-center h-10">
 					<div class="flex-shrink-0">
-						<h1 class="text-xl font-bold theme-fg">rars.js</h1>
+						<h1 class="text-xl font-bold theme-fg">ARES</h1>
 					</div>
 					<div class="flex-shrink-0 mx-auto"></div>
 					<Show when={wasmRuntime.status == "debug" ? wasmRuntime : null}>{debugRuntime => <>

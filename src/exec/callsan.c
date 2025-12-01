@@ -1,10 +1,10 @@
-#include "rarsjs/callsan.h"
+#include "ares/callsan.h"
 
-#include "rarsjs/core.h"
-#include "rarsjs/emulate.h"
+#include "ares/core.h"
+#include "ares/emulate.h"
 
 export u32 g_reg_bitmap;
-RARSJS_ARRAY(ShadowStackEnt) g_shadow_stack = RARSJS_ARRAY_NEW(ShadowStackEnt);
+ARES_ARRAY(ShadowStackEnt) g_shadow_stack = ARES_ARRAY_NEW(ShadowStackEnt);
 export u8 g_callsan_stack_written_by[STACK_LEN / 4];
 
 void callsan_init() {
@@ -16,7 +16,7 @@ void callsan_init() {
                    (1u << REG_S5) | (1u << REG_S6) | (1u << REG_S7) |
                    (1u << REG_S8) | (1u << REG_S9) | (1u << REG_S10) |
                    (1u << REG_S11);
-    g_shadow_stack = RARSJS_ARRAY_NEW(ShadowStackEnt);
+    g_shadow_stack = ARES_ARRAY_NEW(ShadowStackEnt);
 }
 
 bool callsan_can_load(int reg) {
@@ -47,7 +47,7 @@ const u32 CALLSAN_CALL_CLOBBERED =
     (1u << REG_A7);
 
 void callsan_call() {
-    ShadowStackEnt *e = RARSJS_ARRAY_PUSH(&g_shadow_stack);
+    ShadowStackEnt *e = ARES_ARRAY_PUSH(&g_shadow_stack);
     e->sregs[0] = g_regs[REG_FP];
     e->sregs[1] = g_regs[REG_S1];
     for (int i = REG_S2; i <= REG_S11; i++)
@@ -63,12 +63,12 @@ void callsan_call() {
 }
 
 bool callsan_ret() {
-    if (RARSJS_ARRAY_LEN(&g_shadow_stack) == 0) {
+    if (ARES_ARRAY_LEN(&g_shadow_stack) == 0) {
         g_runtime_error_type = ERROR_CALLSAN_RET_EMPTY;
         return false;
     }
 
-    ShadowStackEnt *e = RARSJS_ARRAY_POP(&g_shadow_stack);
+    ShadowStackEnt *e = ARES_ARRAY_POP(&g_shadow_stack);
 
     if (g_regs[REG_SP] != e->sp) {
         g_runtime_error_type = ERROR_CALLSAN_SP_MISMATCH;

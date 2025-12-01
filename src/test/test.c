@@ -2,8 +2,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include "../exec/rarsjs/emulate.h"
-#include "../exec/rarsjs/core.h"
+#include "../exec/ares/emulate.h"
+#include "../exec/ares/core.h"
 
 void setUp(void) {}
 void tearDown(void) {

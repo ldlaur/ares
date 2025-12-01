@@ -1,8 +1,8 @@
-#include "rarsjs/emulate.h"
+#include "ares/emulate.h"
 
-#include "rarsjs/callsan.h"
-#include "rarsjs/core.h"
-#include "rarsjs/dev.h"
+#include "ares/callsan.h"
+#include "ares/core.h"
+#include "ares/dev.h"
 
 export u32 g_regs[32];
 export u32 g_csr[4096];
@@ -68,8 +68,8 @@ static inline u32 remu32(u32 a, u32 b) {
 }
 
 Section *emulator_get_section(u32 addr) {
-    for (size_t i = 0; i < RARSJS_ARRAY_LEN(&g_sections); i++) {
-        Section *sec = *RARSJS_ARRAY_GET(&g_sections, i);
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
+        Section *sec = *ARES_ARRAY_GET(&g_sections, i);
         if (addr >= sec->base && addr < sec->limit) {
             return sec;
         }
@@ -175,7 +175,7 @@ void do_syscall() {
         scause = CAUSE_S_ECALL;
     }
 
-    if (!RARSJS_ARRAY_IS_EMPTY(&g_kernel_text->contents)) {
+    if (!ARES_ARRAY_IS_EMPTY(&g_kernel_text->contents)) {
         emulator_deliver_interrupt(CAUSE_U_ECALL);
         return;
     }
