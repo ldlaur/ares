@@ -106,279 +106,128 @@ u32 JAL(u32 rd, u32 off) { return 0b1101111 | (rd << 7) | (((off >> 12) & 255) <
 u32 JALR(u32 rd, u32 rs1, u32 off) { return 0b1100111 | (rd << 7) | (rs1 << 15) | (off << 20); }
 
 // clang-format on
+
 // compressed instruction
+static inline u16 cbits(u32 val, u32 hi, u32 lo, u32 dst) {
+    return (u16)(extr(val, hi, lo) << dst);
+}
+
+static inline u16 cfunct3(u32 funct3) { return (u16)(funct3 << 13); }
+
 u16 C_LWSP(Reg rd, u32 off) {
-    u16 inst = 0;
-    inst |= 0b010 << 13;            // funct3
-    inst |= extr(off, 5, 5) << 12;  // off[5]
-    inst |= rd << 7;                // rd
-    inst |= extr(off, 4, 2) << 4;   // off[4:2]
-    inst |= extr(off, 7, 6) << 2;   // off[7:6]
-    inst |= 0b10;                   // opcode
-    return inst;
+    return cfunct3(0b010) | cbits(off, 5, 5, 12) | cbits(rd, 4, 0, 7) |
+           cbits(off, 4, 2, 4) | cbits(off, 7, 6, 2) | 0b10;
 }
 
 u16 C_SWSP(Reg rs2, u32 off) {
-    u16 inst = 0;
-    inst |= 0b110 << 13;           // funct3
-    inst |= extr(off, 5, 2) << 9;  // off[5:2]
-    inst |= extr(off, 7, 6) << 7;  // off[7:6]
-    inst |= rs2 << 2;              // rs2
-    inst |= 0b10;                  // opcode
-    return inst;
+    return cfunct3(0b110) | cbits(off, 5, 2, 9) | cbits(off, 7, 6, 7) |
+           cbits(rs2, 4, 0, 2) | 0b10;
 }
 
 u16 C_LW(SmallReg rd_, SmallReg rs1_, u32 off) {
-    u16 inst = 0;
-    inst |= 0b010 << 13;            // funct3
-    inst |= extr(off, 5, 3) << 10;  // off[5:3]
-    inst |= rs1_ << 7;              // rs1
-    inst |= extr(off, 2, 2) << 6;   // off[2]
-    inst |= extr(off, 6, 6) << 5;   // off[6]
-    inst |= rd_ << 2;               // rd
-    inst |= 0b00;                   // opcode
-    return inst;
+    return cfunct3(0b010) | cbits(off, 5, 3, 10) | (cbits(rs1_, 2, 0, 7)) |
+           cbits(off, 2, 2, 6) | cbits(off, 6, 6, 5) | (cbits(rd_, 2, 0, 2)) |
+           0b00;
 }
 
 u16 C_SW(SmallReg rs2_, SmallReg rs1_, u32 off) {
-    u16 inst = 0;
-    inst |= 0b110 << 13;            // funct3
-    inst |= extr(off, 5, 3) << 10;  // off[5:3]
-    inst |= rs1_ << 7;              // rs1
-    inst |= extr(off, 2, 2) << 6;   // off[2]
-    inst |= extr(off, 6, 6) << 5;   // off[6]
-    inst |= rs2_ << 2;              // rs2
-    inst |= 0b00;                   // opcode
-    return inst;
+    return cfunct3(0b110) | cbits(off, 5, 3, 10) | cbits(rs1_, 2, 0, 7) |
+           cbits(off, 2, 2, 6) | cbits(off, 6, 6, 5) |
+           cbits(rs2_, 4, 0, 2) | 0b00;
 }
 
-u16 C_J(u32 off) {
-    u16 inst = 0;
-    inst |= 0b101 << 13;              // funct3
-    inst |= extr(off, 11, 11) << 12;  // off[11]
-    inst |= extr(off, 4, 4) << 11;    // off[4]
-    inst |= extr(off, 9, 8) << 9;     // off[9:8]
-    inst |= extr(off, 10, 10) << 8;   // off[10]
-    inst |= extr(off, 6, 6) << 7;     // off[6]
-    inst |= extr(off, 7, 7) << 6;     // off[7]
-    inst |= extr(off, 3, 1) << 3;     // off[3:1]
-    inst |= extr(off, 5, 5) << 2;     // off[5]
-    inst |= 0b01;                     // opcode
-    return inst;
+static u16 C_J_KIND(u32 funct3, u32 off) {
+    return cfunct3(funct3) | cbits(off, 11, 11, 12) | cbits(off, 4, 4, 11) |
+           cbits(off, 9, 8, 9) | cbits(off, 10, 10, 8) | cbits(off, 6, 6, 7) |
+           cbits(off, 7, 7, 6) | cbits(off, 3, 1, 3) | cbits(off, 5, 5, 2) |
+           0b01;
 }
 
-u16 C_JAL(u32 off) {
-    u16 inst = 0;
-    inst |= 0b001 << 13;              // funct3
-    inst |= extr(off, 11, 11) << 12;  // off[11]
-    inst |= extr(off, 4, 4) << 11;    // off[4]
-    inst |= extr(off, 9, 8) << 9;     // off[9:8]
-    inst |= extr(off, 10, 10) << 8;   // off[10]
-    inst |= extr(off, 6, 6) << 7;     // off[6]
-    inst |= extr(off, 7, 7) << 6;     // off[7]
-    inst |= extr(off, 3, 1) << 3;     // off[3:1]
-    inst |= extr(off, 5, 5) << 2;     // off[5]
-    inst |= 0b01;                     // opcode
-    return inst;
+u16 C_J(u32 off) { return C_J_KIND(0b101, off); }
+
+u16 C_JAL(u32 off) { return C_J_KIND(0b001, off); }
+
+u16 C_JR(Reg rs1) { return (0b1000 << 12) | (u16)((rs1 & 0x1f) << 7) | 0b10; }
+
+u16 C_JALR(Reg rs1) { return (0b1001 << 12) | (u16)((rs1 & 0x1f) << 7) | 0b10; }
+
+static u16 C_BRANCH_KIND(u32 funct3, SmallReg rs1_, u32 off) {
+    return cfunct3(funct3) | cbits(off, 8, 8, 12) | cbits(off, 4, 3, 10) |
+           cbits(rs1_, 2, 0, 7) | cbits(off, 7, 6, 5) |
+           cbits(off, 2, 1, 3) | cbits(off, 5, 5, 2) | 0b01;
 }
 
-u16 C_JR(Reg rs1) {
-    u16 inst = 0;
-    inst |= 0b1000 << 12;  // funct4
-    inst |= rs1 << 7;      // rs1
-    inst |= 0b10;          // opcode
-    return inst;
-}
+u16 C_BEQZ(SmallReg rs1_, u32 off) { return C_BRANCH_KIND(0b110, rs1_, off); }
 
-u16 C_JALR(Reg rs1) {
-    u16 inst = 0;
-    inst |= 0b1001 << 12;  // funct4
-    inst |= rs1 << 7;      // rs1
-    inst |= 0b10;          // opcode
-    return inst;
-}
-
-u16 C_BEQZ(SmallReg rs1_, u32 off) {
-    u16 inst = 0;
-    inst |= 0b110 << 13;            // funct3
-    inst |= extr(off, 8, 8) << 12;  // off[8]
-    inst |= extr(off, 4, 3) << 10;  // off[4:3]
-    inst |= rs1_ << 7;              // rs1
-    inst |= extr(off, 7, 6) << 5;   // off[7:6]
-    inst |= extr(off, 2, 1) << 3;   // off[2:1]
-    inst |= extr(off, 5, 5) << 2;   // off[5]
-    inst |= 0b01;                   // opcode
-    return inst;
-}
-
-u16 C_BNEZ(SmallReg rs1_, u32 off) {
-    u16 inst = 0;
-    inst |= 0b111 << 13;            // funct3
-    inst |= extr(off, 8, 8) << 12;  // off[8]
-    inst |= extr(off, 4, 3) << 10;  // off[4:3]
-    inst |= rs1_ << 7;              // rs1
-    inst |= extr(off, 7, 6) << 5;   // off[7:6]
-    inst |= extr(off, 2, 1) << 3;   // off[2:1]
-    inst |= extr(off, 5, 5) << 2;   // off[5]
-    inst |= 0b01;                   // opcode
-    return inst;
-}
+u16 C_BNEZ(SmallReg rs1_, u32 off) { return C_BRANCH_KIND(0b111, rs1_, off); }
 
 u16 C_LI(Reg rd, u32 imm) {
-    u16 inst = 0;
-    inst |= 0b010 << 13;            // funct3
-    inst |= extr(imm, 5, 5) << 12;  // imm[5]
-    inst |= rd << 7;                // rd
-    inst |= extr(imm, 4, 0) << 2;   // imm[4:0]
-    inst |= 0b01;                   // opcode
-    return inst;
+    return cfunct3(0b010) | cbits(imm, 5, 5, 12) | (u16)((rd & 0x1f) << 7) |
+           cbits(imm, 4, 0, 2) | 0b01;
 }
 
 u16 C_LUI(Reg rd, u32 nzimm) {
-    u16 inst = 0;
-    inst |= 0b011 << 13;                // funct3
-    inst |= extr(nzimm, 17, 17) << 12;  // nzimm[17]
-    inst |= rd << 7;                    // rd
-    inst |= extr(nzimm, 16, 12) << 2;   // nzimm[16:12]
-    inst |= 0b01;                       // opcode
-    return inst;
+    return cfunct3(0b011) | cbits(nzimm, 5, 5, 12) | (u16)((rd & 0x1f) << 7) |
+           cbits(nzimm, 4, 0, 2) | 0b01;
 }
 
 u16 C_ADDI(Reg rd, u32 nzimm) {
-    u16 inst = 0;
-    inst |= 0b000 << 13;              // funct3
-    inst |= extr(nzimm, 5, 5) << 12;  // nzimm[5]
-    inst |= rd << 7;                  // rd
-    inst |= extr(nzimm, 4, 0) << 2;   // nzimm[4:0]
-    inst |= 0b01;                     // opcode
-    return inst;
+    return cfunct3(0b000) | cbits(nzimm, 5, 5, 12) | (u16)((rd & 0x1f) << 7) |
+           cbits(nzimm, 4, 0, 2) | 0b01;
 }
 
 u16 C_ADDI16SP(u32 nzimm) {
-    u16 inst = 0;
-    inst |= 0b011 << 13;              // funct3
-    inst |= extr(nzimm, 9, 9) << 12;  // nzimm[9]
-    inst |= 2 << 7;                   // rd = x2
-    inst |= extr(nzimm, 4, 4) << 6;   // nzimm[4]
-    inst |= extr(nzimm, 6, 6) << 5;   // nzimm[6]
-    inst |= extr(nzimm, 8, 7) << 3;   // nzimm[8:7]
-    inst |= extr(nzimm, 5, 5) << 2;   // nzimm[5]
-    inst |= 0b01;                     // opcode
-    return inst;
+    return cfunct3(0b011) | cbits(nzimm, 9, 9, 12) | (2 << 7) |
+           cbits(nzimm, 4, 4, 6) | cbits(nzimm, 6, 6, 5) |
+           cbits(nzimm, 8, 7, 3) | cbits(nzimm, 5, 5, 2) | 0b01;
 }
 
 u16 C_ADDI4SPN(SmallReg rd_, u32 nzuimm) {
-    u16 inst = 0;
-    inst |= 0b000 << 13;            // funct3
-    inst |= extr(nzuimm, 5, 4) << 11;  // nzuimm[5:4]
-    inst |= extr(nzuimm, 9, 6) << 7;   // nzuimm[9:6]
-    inst |= extr(nzuimm, 2, 2) << 6;   // nzuimm[2]
-    inst |= extr(nzuimm, 3, 3) << 5;   // nzuimm[3]
-    inst |= rd_ << 2;               // rd
-    inst |= 0b00;                   // opcode
-    return inst;
+    return cfunct3(0b000) | cbits(nzuimm, 5, 4, 11) | cbits(nzuimm, 9, 6, 7) |
+           cbits(nzuimm, 2, 2, 6) | cbits(nzuimm, 3, 3, 5) |
+           cbits(rd_, 2, 0, 2) | 0b00;
 }
 
 u16 C_SLLI(Reg rd, u32 shamt) {
-    u16 inst = 0;
-    inst |= 0b000 << 13;              // funct3
-    inst |= extr(shamt, 5, 5) << 12;  // shamt[5]
-    inst |= rd << 7;                  // rd
-    inst |= extr(shamt, 4, 0) << 2;   // shamt[4:0]
-    inst |= 0b10;                     // opcode
-    return inst;
+    return cfunct3(0b000) | cbits(shamt, 5, 5, 12) | cbits(rd, 4, 0, 7) |
+           cbits(shamt, 4, 0, 2) | 0b10;
 }
 
-u16 C_SRLI(SmallReg rd_, u32 shamt) {
-    u16 inst = 0;
-    inst |= 0b100 << 13;              // funct3
-    inst |= extr(shamt, 5, 5) << 12;  // shamt[5]
-    inst |= 0b00 << 10;               // funct2
-    inst |= rd_ << 7;                 // rd
-    inst |= extr(shamt, 4, 0) << 2;   // shamt[4:0]
-    inst |= 0b01;                     // opcode
-    return inst;
+static u16 C_SHIFT_RIGHT(u32 funct2, SmallReg rd_, u32 shamt) {
+    return cfunct3(0b100) | cbits(shamt, 5, 5, 12) | (u16)(funct2 << 10) |
+           cbits(rd_, 2, 0, 7) | cbits(shamt, 4, 0, 2) | 0b01;
 }
 
-u16 C_SRAI(SmallReg rd_, u32 shamt) {
-    u16 inst = 0;
-    inst |= 0b100 << 13;              // funct3
-    inst |= extr(shamt, 5, 5) << 12;  // shamt[5]
-    inst |= 0b01 << 10;               // funct2
-    inst |= rd_ << 7;                 // rd
-    inst |= extr(shamt, 4, 0) << 2;   // shamt[4:0]
-    inst |= 0b01;                     // opcode
-    return inst;
-}
+u16 C_SRLI(SmallReg rd_, u32 shamt) { return C_SHIFT_RIGHT(0b00, rd_, shamt); }
+
+u16 C_SRAI(SmallReg rd_, u32 shamt) { return C_SHIFT_RIGHT(0b01, rd_, shamt); }
 
 u16 C_ANDI(SmallReg rd_, u32 imm) {
-    u16 inst = 0;
-    inst |= 0b100 << 13;            // funct3
-    inst |= extr(imm, 5, 5) << 12;  // imm[5]
-    inst |= 0b10 << 10;             // funct2
-    inst |= rd_ << 7;               // rd
-    inst |= extr(imm, 4, 0) << 2;   // imm[4:0]
-    inst |= 0b01;                   // opcode
-    return inst;
+    return cfunct3(0b100) | cbits(imm, 5, 5, 12) | (0b10 << 10) |
+           cbits(rd_, 2, 0, 7) | cbits(imm, 4, 0, 2) | 0b01;
 }
 u16 C_MV(Reg rd, u32 rs2) {
-    u16 inst = 0;
-    inst |= 0b1000 << 12;  // funct4
-    inst |= rd << 7;       // rd
-    inst |= rs2 << 2;      // rs2
-    inst |= 0b10;          // opcode
-    return inst;
+    return (0b1000 << 12) | cbits(rd, 4, 0, 7) | cbits(rs2, 4, 0, 2) |
+           0b10;
 }
 
 u16 C_ADD(Reg rd, u32 rs2) {
-    u16 inst = 0;
-    inst |= 0b100 << 13;  // funct3
-    inst |= 1 << 12;      // funct1
-    inst |= rd << 7;      // rd
-    inst |= rs2 << 2;     // rs2
-    inst |= 0b10;         // opcode
-    return inst;
+    return cfunct3(0b100) | (1 << 12) | cbits(rd, 4, 0, 7) |
+           cbits(rs2, 4, 0, 2) | 0b10;
 }
 
-u16 C_AND(SmallReg rd_, SmallReg rs2_) {
-    u16 inst = 0;
-    inst |= 0b100011 << 10;  // funct6
-    inst |= rd_ << 7;        // rd
-    inst |= 0b11 << 5;       // funct2
-    inst |= rs2_ << 2;       // rs2
-    inst |= 0b01;            // opcode
-    return inst;
+static u16 C_ALU(SmallReg rd_, SmallReg rs2_, u32 funct2) {
+    return (0b100011 << 10) | cbits(rd_, 2, 0, 7) | (u16)(funct2 << 5) |
+           cbits(rs2_, 2, 0, 2) | 0b01;
 }
 
-u16 C_OR(SmallReg rd_, SmallReg rs2_) {
-    u16 inst = 0;
-    inst |= 0b100011 << 10;  // funct6
-    inst |= rd_ << 7;        // rd
-    inst |= 0b10 << 5;       // funct2
-    inst |= rs2_ << 2;       // rs2
-    inst |= 0b01;            // opcode
-    return inst;
-}
+u16 C_AND(SmallReg rd_, SmallReg rs2_) { return C_ALU(rd_, rs2_, 0b11); }
 
-u16 C_XOR(SmallReg rd_, SmallReg rs2_) {
-    u16 inst = 0;
-    inst |= 0b100011 << 10;  // funct6
-    inst |= rd_ << 7;        // rd
-    inst |= 0b01 << 5;       // funct2
-    inst |= rs2_ << 2;       // rs2
-    inst |= 0b01;            // opcode
-    return inst;
-}
+u16 C_OR(SmallReg rd_, SmallReg rs2_) { return C_ALU(rd_, rs2_, 0b10); }
 
-u16 C_SUB(SmallReg rd_, SmallReg rs2_) {
-    u16 inst = 0;
-    inst |= 0b10011 << 10;  // funct6
-    inst |= rd_ << 7;       // rd
-    inst |= 0b00 << 5;      // funct2
-    inst |= rs2_ << 2;      // rs2
-    inst |= 0b01;           // opcode
-    return inst;
-}
+u16 C_XOR(SmallReg rd_, SmallReg rs2_) { return C_ALU(rd_, rs2_, 0b01); }
+
+u16 C_SUB(SmallReg rd_, SmallReg rs2_) { return C_ALU(rd_, rs2_, 0b00); }
 
 u16 C_NOP(void) { return 0b01; }
 
@@ -942,15 +791,6 @@ const char *label(Parser *p, Parser *orig, DeferredInsnCb *cb,
                   const char *opcode, size_t opcode_len, u32 *out_addr,
                   bool *later, DeferredInsnReloc *reloc) {
     *later = false;
-
-    i32 off;
-    Parser fallback = *p;
-    if (parse_numeric(p, &off)) {
-        *out_addr = (u32)(g_section->emit_idx + g_section->base + off);
-        return NULL;
-    }
-    *p = fallback;
-
     const char *target;
     size_t target_len;
     parse_ident(p, &target, &target_len);
@@ -998,6 +838,38 @@ const char *handle_branch(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
+    Parser before_target = *p;
+    i32 simm;
+    if (parse_numeric(p, &simm)) {
+        if (simm >= (1 << 12) || simm < -(1 << 12))
+            return "Branch immediate too large";
+        if (simm & 1) return "Branch target must be even";
+
+        u32 inst = 0;
+        if (str_eq_case(opcode, opcode_len, "beq")) inst = BEQ(s1, s2, simm);
+        else if (str_eq_case(opcode, opcode_len, "bne"))
+            inst = BNE(s1, s2, simm);
+        else if (str_eq_case(opcode, opcode_len, "blt"))
+            inst = BLT(s1, s2, simm);
+        else if (str_eq_case(opcode, opcode_len, "bge"))
+            inst = BGE(s1, s2, simm);
+        else if (str_eq_case(opcode, opcode_len, "bltu"))
+            inst = BLTU(s1, s2, simm);
+        else if (str_eq_case(opcode, opcode_len, "bgeu"))
+            inst = BGEU(s1, s2, simm);
+        else if (str_eq_case(opcode, opcode_len, "bgt"))
+            inst = BLT(s2, s1, simm);
+        else if (str_eq_case(opcode, opcode_len, "ble"))
+            inst = BGE(s2, s1, simm);
+        else if (str_eq_case(opcode, opcode_len, "bgtu"))
+            inst = BLTU(s2, s1, simm);
+        else if (str_eq_case(opcode, opcode_len, "bleu"))
+            inst = BGEU(s2, s1, simm);
+        asm_emit(inst, p->startline);
+        return NULL;
+    }
+    *p = before_target;
+
     const char *err = label(p, &orig, handle_branch, opcode, opcode_len, &addr,
                             &later, reloc_branch);
     if (err) return err;
@@ -1005,7 +877,7 @@ const char *handle_branch(Parser *p, const char *opcode, size_t opcode_len) {
         asm_emit(0, p->startline);
         return NULL;
     }
-    i32 simm = addr - (g_section->emit_idx + g_section->base);
+    simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 12) || simm < -(1 << 12))
         return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
@@ -1038,6 +910,30 @@ const char *handle_branch_zero(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
+    Parser before_target = *p;
+    i32 simm;
+    if (parse_numeric(p, &simm)) {
+        if (simm >= (1 << 12) || simm < -(1 << 12))
+            return "Branch immediate too large";
+        if (simm & 1) return "Branch target must be even";
+
+        u32 inst = 0;
+        if (str_eq_case(opcode, opcode_len, "beqz")) inst = BEQ(s, 0, simm);
+        else if (str_eq_case(opcode, opcode_len, "bnez"))
+            inst = BNE(s, 0, simm);
+        else if (str_eq_case(opcode, opcode_len, "blez"))
+            inst = BGE(0, s, simm);
+        else if (str_eq_case(opcode, opcode_len, "bgez"))
+            inst = BGE(s, 0, simm);
+        else if (str_eq_case(opcode, opcode_len, "bltz"))
+            inst = BLT(s, 0, simm);
+        else if (str_eq_case(opcode, opcode_len, "bgtz"))
+            inst = BLT(0, s, simm);
+        asm_emit(inst, p->startline);
+        return NULL;
+    }
+    *p = before_target;
+
     const char *err = label(p, &orig, handle_branch_zero, opcode, opcode_len,
                             &addr, &later, reloc_branch);
     if (err) return err;
@@ -1045,7 +941,7 @@ const char *handle_branch_zero(Parser *p, const char *opcode,
         asm_emit(0, p->startline);
         return NULL;
     }
-    i32 simm = addr - (g_section->emit_idx + g_section->base);
+    simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 12) || simm < -(1 << 12))
         return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
@@ -1110,6 +1006,17 @@ const char *handle_jump(Parser *p, const char *opcode, size_t opcode_len) {
     } else assert(false);
 
     skip_trailing(p);
+    Parser before_target = *p;
+    i32 simm;
+    if (parse_numeric(p, &simm)) {
+        if (simm >= (1 << 20) || simm < -(1 << 20))
+            return "Jump immediate too large";
+        if (simm & 1) return "Jump target must be even";
+        asm_emit(JAL(d, simm), p->startline);
+        return NULL;
+    }
+    *p = before_target;
+
     u32 addr;
     err = label(p, &orig, handle_jump, opcode, opcode_len, &addr, &later,
                 reloc_jal);
@@ -1118,7 +1025,7 @@ const char *handle_jump(Parser *p, const char *opcode, size_t opcode_len) {
         asm_emit(0, p->startline);
         return NULL;
     }
-    i32 simm = addr - (g_section->emit_idx + g_section->base);
+    simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 20) || simm < -(1 << 20))
         return "Jump immediate too large";
     if (simm & 1) return "Jump target must be even";
@@ -1313,9 +1220,7 @@ const char *handle_csr_imm(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-        if (parse_numeric(p, &csr)) {
-        if (csr < 0 || csr >= 4096) return "Invalid CSR";
-    } else if ((csr = parse_csr(p)) == -1) return "Invalid CSR";
+    if ((csr = parse_csr(p)) == -1) return "Invalid CSR";
 
     skip_trailing(p);
     if (!consume_if(p, ',')) return "Expected ,";
@@ -1333,11 +1238,11 @@ const char *handle_csr_imm(Parser *p, const char *opcode, size_t opcode_len) {
     asm_emit(inst, p->startline);
     return NULL;
 }
-
 // compressed handlers
+
 const char *handle_c_lwsp(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1347,17 +1252,17 @@ const char *handle_c_lwsp(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < 0 || imm > 255) return "Out of bounds immediate";
-    if (imm % 4 != 0) return "Immediate must be a multiple of 4";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < 0 || simm > 255) return "Out of bounds immediate";
+    if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
-    asm_emit_16(C_LWSP(d, imm), p->startline);
+    asm_emit_16(C_LWSP(d, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_swsp(Parser *p, const char *opcode, size_t opcode_len) {
     Reg s2;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((s2 = parse_reg(p)) == -1) return "Invalid rs2";
@@ -1366,18 +1271,18 @@ const char *handle_c_swsp(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < 0 || imm > 255) return "Out of bounds immediate";
-    if (imm % 4 != 0) return "Immediate must be a multiple of 4";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < 0 || simm > 255) return "Out of bounds immediate";
+    if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
-    asm_emit_16(C_SWSP(s2, imm), p->startline);
+    asm_emit_16(C_SWSP(s2, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_lw(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d, s1;
     SmallReg cd, cs1;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1387,9 +1292,9 @@ const char *handle_c_lw(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < 0 || imm > 127) return "Out of bounds immediate";
-    if (imm % 4 != 0) return "Immediate must be a multiple of 4";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < 0 || simm > 127) return "Out of bounds immediate";
+    if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
     skip_trailing(p);
     if (!consume_if(p, '(')) return "Expected (";
@@ -1404,14 +1309,14 @@ const char *handle_c_lw(Parser *p, const char *opcode, size_t opcode_len) {
     cd = d - 8;
     cs1 = s1 - 8;
 
-    asm_emit_16(C_LW(cd, cs1, imm), p->startline);
+    asm_emit_16(C_LW(cd, cs1, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_sw(Parser *p, const char *opcode, size_t opcode_len) {
     Reg s2, s1;
     SmallReg cs2, cs1;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((s2 = parse_reg(p)) == -1) return "Invalid rs2";
@@ -1421,9 +1326,9 @@ const char *handle_c_sw(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < 0 || imm > 127) return "Out of bounds immediate";
-    if (imm % 4 != 0) return "Immediate must be a multiple of 4";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < 0 || simm > 127) return "Out of bounds immediate";
+    if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
     skip_trailing(p);
     if (!consume_if(p, '(')) return "Expected (";
@@ -1438,7 +1343,7 @@ const char *handle_c_sw(Parser *p, const char *opcode, size_t opcode_len) {
     cs2 = s2 - 8;
     cs1 = s1 - 8;
 
-    asm_emit_16(C_SW(cs2, cs1, imm), p->startline);
+    asm_emit_16(C_SW(cs2, cs1, simm), p->startline);
     return NULL;
 }
 
@@ -1448,6 +1353,23 @@ const char *handle_c_jump(Parser *p, const char *opcode, size_t opcode_len) {
     bool later;
 
     skip_trailing(p);
+    Parser before_target = *p;
+    i32 simm;
+    if (parse_numeric(p, &simm)) {
+        if (simm >= (1 << 11) || simm < -(1 << 11))
+            return "Jump immediate too large";
+        if (simm & 1) return "Jump target must be even";
+
+        if (str_eq_case(opcode, opcode_len, "c.j")) {
+            asm_emit_16(C_J(simm), p->startline);
+        } else if (str_eq_case(opcode, opcode_len, "c.jal")) {
+            asm_emit_16(C_JAL(simm), p->startline);
+        }
+
+        return NULL;
+    }
+    *p = before_target;
+
     const char *err = label(p, &orig, handle_c_jump, opcode, opcode_len, &addr,
                             &later, reloc_c_j);
     if (err) return err;
@@ -1456,14 +1378,15 @@ const char *handle_c_jump(Parser *p, const char *opcode, size_t opcode_len) {
         return NULL;
     }
 
-    i32 imm = addr - (g_section->emit_idx + g_section->base);
-    if (imm >= (1 << 11) || imm < -(1 << 11)) return "Jump immediate too large";
-    if (imm & 1) return "Jump target must be even";
+    simm = addr - (g_section->emit_idx + g_section->base);
+    if (simm >= (1 << 11) || simm < -(1 << 11))
+        return "Jump immediate too large";
+    if (simm & 1) return "Jump target must be even";
 
     if (str_eq_case(opcode, opcode_len, "c.j")) {
-        asm_emit_16(C_J(imm), p->startline);
+        asm_emit_16(C_J(simm), p->startline);
     } else if (str_eq_case(opcode, opcode_len, "c.jal")) {
-        asm_emit_16(C_JAL(imm), p->startline);
+        asm_emit_16(C_JAL(simm), p->startline);
     }
 
     return NULL;
@@ -1503,6 +1426,24 @@ const char *handle_c_branch_zero(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
+    Parser before_target = *p;
+    i32 simm;
+    if (parse_numeric(p, &simm)) {
+        if (simm >= 256 || simm < -256) return "Branch immediate too large";
+        if (simm & 1) return "Branch target must be even";
+
+        cs1 = s1 - 8;
+
+        if (str_eq_case(opcode, opcode_len, "c.beqz")) {
+            asm_emit_16(C_BEQZ(cs1, simm), p->startline);
+        } else if (str_eq_case(opcode, opcode_len, "c.bnez")) {
+            asm_emit_16(C_BNEZ(cs1, simm), p->startline);
+        }
+
+        return NULL;
+    }
+    *p = before_target;
+
     const char *err = label(p, &orig, handle_c_branch_zero, opcode, opcode_len,
                             &addr, &later, reloc_branch);
     if (err) return err;
@@ -1511,16 +1452,16 @@ const char *handle_c_branch_zero(Parser *p, const char *opcode,
         return NULL;
     }
 
-    i32 imm = addr - (g_section->emit_idx + g_section->base);
-    if (imm >= 256 || imm < -256) return "Branch immediate too large";
-    if (imm & 1) return "Branch target must be even";
+    simm = addr - (g_section->emit_idx + g_section->base);
+    if (simm >= 256 || simm < -256) return "Branch immediate too large";
+    if (simm & 1) return "Branch target must be even";
 
     cs1 = s1 - 8;
 
     if (str_eq_case(opcode, opcode_len, "c.beqz")) {
-        asm_emit_16(C_BEQZ(cs1, imm), p->startline);
+        asm_emit_16(C_BEQZ(cs1, simm), p->startline);
     } else if (str_eq_case(opcode, opcode_len, "c.bnez")) {
-        asm_emit_16(C_BNEZ(cs1, imm), p->startline);
+        asm_emit_16(C_BNEZ(cs1, simm), p->startline);
     }
 
     return NULL;
@@ -1528,7 +1469,7 @@ const char *handle_c_branch_zero(Parser *p, const char *opcode,
 
 const char *handle_c_li(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1538,16 +1479,16 @@ const char *handle_c_li(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < -32 || imm > 31) return "Out of bounds immediate";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < -32 || simm > 31) return "Out of bounds immediate";
 
-    asm_emit_16(C_LI(d, imm), p->startline);
+    asm_emit_16(C_LI(d, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_lui(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1557,18 +1498,18 @@ const char *handle_c_lui(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < -32 || imm > 31) return "Out of bounds immediate";
-    if (imm == 0) return "Immediate cannot be 0 for c.lui: reserved ";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < -32 || simm > 31) return "Out of bounds immediate";
+    if (simm == 0) return "Immediate cannot be 0 for c.lui: reserved ";
     if (d == 2) return "c.lui x2, imm corresponds to c.addi16sp";
 
-    asm_emit_16(C_LUI(d, imm), p->startline);
+    asm_emit_16(C_LUI(d, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_addi(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1576,22 +1517,22 @@ const char *handle_c_addi(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < -32 || imm > 31) return "Out of bounds immediate";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < -32 || simm > 31) return "Out of bounds immediate";
 
-    if (d == 0 && imm == 0) return "c.addi x0, 0 corresponds to c.nop";
-    if (d == 0 && imm != 0)
+    if (d == 0 && simm == 0) return "c.addi x0, 0 corresponds to c.nop";
+    if (d == 0 && simm != 0)
         return "rd x0, imm is not a valid instruction: HINT";
-    if (imm == 0) return "Immediate cannot be 0 for c.addi: HINT";
+    if (simm == 0) return "Immediate cannot be 0 for c.addi: HINT";
 
-    asm_emit_16(C_ADDI(d, imm), p->startline);
+    asm_emit_16(C_ADDI(d, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_addi16sp(Parser *p, const char *opcode,
                               size_t opcode_len) {
     Reg d;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1601,12 +1542,12 @@ const char *handle_c_addi16sp(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < -512 || imm > 496) return "Out of bounds immediate";
-    if (imm == 0) return "Immediate can't be 0 for c.addi16sp: reserved";
-    if (imm % 16 != 0) return "Immediate must be a multiple of 16";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < -512 || simm > 496) return "Out of bounds immediate";
+    if (simm == 0) return "Immediate can't be 0 for c.addi16sp: reserved";
+    if (simm % 16 != 0) return "Immediate must be a multiple of 16";
 
-    asm_emit_16(C_ADDI16SP(imm), p->startline);
+    asm_emit_16(C_ADDI16SP(simm), p->startline);
     return NULL;
 }
 
@@ -1614,7 +1555,7 @@ const char *handle_c_addi4spn(Parser *p, const char *opcode,
                               size_t opcode_len) {
     Reg d;
     SmallReg cd;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1624,20 +1565,20 @@ const char *handle_c_addi4spn(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm <= 0 || imm > 1020) return "Out of bounds immediate";
-    if (imm == 0) return "Immediate cannot be 0 for c.addi4spn: reserved";
-    if (imm % 4 != 0) return "Immediate must be a multiple of 4";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm <= 0 || simm > 1020) return "Out of bounds immediate";
+    if (simm == 0) return "Immediate cannot be 0 for c.addi4spn: reserved";
+    if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
     cd = d - 8;
 
-    asm_emit_16(C_ADDI4SPN(cd, imm), p->startline);
+    asm_emit_16(C_ADDI4SPN(cd, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_slli(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1647,11 +1588,11 @@ const char *handle_c_slli(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < 0 || imm >= 32) return "Invalid shift immediate";
-    if (imm == 0) return "Shift immediate cannot be 0 for c.slli: reserved";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < 0 || simm >= 32) return "Invalid shift immediate";
+    if (simm == 0) return "Shift immediate cannot be 0 for c.slli: reserved";
 
-    asm_emit_16(C_SLLI(d, imm), p->startline);
+    asm_emit_16(C_SLLI(d, simm), p->startline);
     return NULL;
 }
 
@@ -1659,7 +1600,7 @@ const char *handle_c_shift_right(Parser *p, const char *opcode,
                                  size_t opcode_len) {
     Reg d;
     SmallReg cd;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1669,16 +1610,17 @@ const char *handle_c_shift_right(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < 0 || imm >= 32) return "Invalid shift immediate";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < 0 || simm >= 32) return "Invalid shift immediate";
 
     cd = d - 8;
 
     if (str_eq_case(opcode, opcode_len, "c.srli")) {
-        if (imm == 0) return "shamt can't be 0 for c.srli: HINT";
-        asm_emit_16(C_SRLI(cd, imm), p->startline);
+        if (simm == 0) return "shamt can't be 0 for c.srli: HINT";
+        asm_emit_16(C_SRLI(cd, simm), p->startline);
     } else if (str_eq_case(opcode, opcode_len, "c.srai")) {
-        asm_emit_16(C_SRAI(cd, imm), p->startline);
+        if (simm == 0) return "shamt can't be 0 for c.srai: HINT";
+        asm_emit_16(C_SRAI(cd, simm), p->startline);
     }
 
     return NULL;
@@ -1687,7 +1629,7 @@ const char *handle_c_shift_right(Parser *p, const char *opcode,
 const char *handle_c_andi(Parser *p, const char *opcode, size_t opcode_len) {
     Reg d;
     SmallReg cd;
-    i32 imm;
+    i32 simm;
 
     skip_trailing(p);
     if ((d = parse_reg(p)) == -1) return "Invalid rd";
@@ -1697,12 +1639,12 @@ const char *handle_c_andi(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    if (!parse_numeric(p, &imm)) return "Invalid immediate";
-    if (imm < -32 || imm > 31) return "Out of bounds immediate";
+    if (!parse_numeric(p, &simm)) return "Invalid immediate";
+    if (simm < -32 || simm > 31) return "Out of bounds immediate";
 
     cd = d - 8;
 
-    asm_emit_16(C_ANDI(cd, imm), p->startline);
+    asm_emit_16(C_ANDI(cd, simm), p->startline);
     return NULL;
 }
 
@@ -1761,7 +1703,13 @@ const char *handle_c_logic(Parser *p, const char *opcode, size_t opcode_len) {
 }
 
 const char *handle_c_nop(Parser *p, const char *opcode, size_t opcode_len) {
-    asm_emit_16(C_NOP(), p->startline);
+    i32 value = 0;
+    if (peek(p) >= '0' && peek(p) <= '9') {
+        if (!parse_numeric(p, &value)) {
+            return "Invalid nop hint value";
+        }
+    }
+    asm_emit_16(C_ADDI(0, value), p->startline);
     return NULL;
 }
 
