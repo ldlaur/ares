@@ -1,5 +1,6 @@
 import {
     convertNumber,
+    instructionSizeFromHalfword,
     REG_SP,
     SHADOW_STACK_ARG_COUNT,
     SHADOW_STACK_ARGS,
@@ -311,16 +312,35 @@ export class Emulator {
 
     nextStep(): EmulatorState {
         if (this.currentState.status != "debug") return this.currentState;
-        const inst = this.load(this.wasm.pc[0], 4);
+        const pc = this.wasm.pc[0];
+        const halfword = this.load(pc, 2);
+        const size = instructionSizeFromHalfword(halfword);
+        const inst = size === 2 ? halfword : this.load(pc, 4);
         const opcode = inst & 0x7f;
         const funct3 = (inst >> 12) & 0x7;
         const rd = (inst >> 7) & 0x1f;
-        const isCall =
-            (opcode === 0x6f || (opcode === 0x67 && funct3 === 0)) && rd === 1;
+        let isCall =
+            size === 4 &&
+            (opcode === 0x6f || (opcode === 0x67 && funct3 === 0)) &&
+            rd === 1;
+
+        if (size === 2) {
+            const funct3c = (inst >> 13) & 0x7;
+            const opcodec = inst & 0x3;
+            const rs1 = (inst >> 7) & 0x1f;
+            const rs2 = (inst >> 2) & 0x1f;
+            isCall =
+                (opcodec === 0b01 && funct3c === 0b001) ||
+                (opcodec === 0b10 &&
+                    funct3c === 0b100 &&
+                    ((inst >> 12) & 1) === 1 &&
+                    rs1 !== 0 &&
+                    rs2 === 0);
+        }
 
         if (isCall) {
             let state = this.continueExecution({
-                pc: this.wasm.pc[0] + 4,
+                pc: pc + size,
                 sp: this.wasm.regsArr[REG_SP],
             });
             return state;

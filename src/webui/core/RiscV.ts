@@ -31,6 +31,9 @@ export function convertNumber(x: number, decimal: boolean): string {
   return isPointer ? "0x" + u.toString(16).padStart(8, "0") : u.toString();
 }
 
+export function instructionSizeFromHalfword(halfword: number): number {
+  return (halfword & 0b11) === 0b11 ? 4 : 2;
+}
 
 interface WasmExports {
   emulate(): void;

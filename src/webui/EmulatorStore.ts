@@ -1,8 +1,8 @@
-
 import { createStore, reconcile } from "solid-js/store";
 import { createSignal } from "solid-js";
 import { emulator } from ".";
 import { EmulatorState, TestCaseResult } from "./core/EmulatorState";
+
 
 export const [state, setState] = createStore<EmulatorState>({
     status: "idle",
