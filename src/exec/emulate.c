@@ -25,16 +25,6 @@ static int g_privilege_level = PRIV_USER;
 
 static size_t i32_to_str(i32 val, char buf[12]);
 
-// end is inclusive, like in Verilog
-static inline u32 extr(u32 val, u32 end, u32 start) {
-    assert(end <= 31 && start <= end);
-    // I need to do this here because shifting by >= bitsize is UB
-    // start=0 end=31 means end+1-start=32, and shifting an u32 by 32 is UB
-    if (start == 0 && end == 31) return val;
-    u32 mask = (1u << (end + 1 - start)) - 1;
-    return (val >> start) & mask;
-}
-
 static inline i32 sext(u32 x, int bits) {
     int m = 32 - bits;
     return ((i32)(x << m)) >> m;
@@ -274,6 +264,319 @@ void wrcsr(u32 csr, u32 val) {
     g_csr[csr] = (g_csr[csr] & ~mask) | (val & mask);
 }
 
+// helpers
+static inline u32 c_reg(u32 reg) { return 8 + reg; }
+
+static inline i32 c_imm6(u16 inst) {
+    return sext((extr(inst, 12, 12) << 5) | extr(inst, 6, 2), 6);
+}
+
+static inline u32 c_lwsp_off(u16 inst) {
+    return (extr(inst, 12, 12) << 5) | (extr(inst, 6, 4) << 2) |
+           (extr(inst, 3, 2) << 6);
+}
+
+static inline u32 c_swsp_off(u16 inst) {
+    return (extr(inst, 12, 9) << 2) | (extr(inst, 8, 7) << 6);
+}
+
+static inline u32 c_lw_sw_off(u16 inst) {
+    return (extr(inst, 12, 10) << 3) | (extr(inst, 6, 6) << 2) |
+           (extr(inst, 5, 5) << 6);
+}
+
+static inline u32 c_addi4spn_nzuimm(u16 inst) {
+    return (extr(inst, 12, 11) << 4) | (extr(inst, 10, 7) << 6) |
+           (extr(inst, 6, 6) << 2) | (extr(inst, 5, 5) << 3);
+}
+
+static inline i32 c_addi16sp_nzimm(u16 inst) {
+    return sext((extr(inst, 12, 12) << 9) | (extr(inst, 6, 6) << 4) |
+                    (extr(inst, 5, 5) << 6) | (extr(inst, 4, 3) << 7) |
+                    (extr(inst, 2, 2) << 5),
+                10);
+}
+
+static inline i32 c_jump_off(u16 inst) {
+    return sext((extr(inst, 12, 12) << 11) | (extr(inst, 11, 11) << 4) |
+                    (extr(inst, 10, 9) << 8) | (extr(inst, 8, 8) << 10) |
+                    (extr(inst, 7, 7) << 6) | (extr(inst, 6, 6) << 7) |
+                    (extr(inst, 5, 3) << 1) | (extr(inst, 2, 2) << 5),
+                12);
+}
+
+static inline i32 c_branch_off(u16 inst) {
+    return sext((extr(inst, 12, 12) << 8) | (extr(inst, 11, 10) << 3) |
+                    (extr(inst, 6, 5) << 6) | (extr(inst, 4, 3) << 1) |
+                    (extr(inst, 2, 2) << 5),
+                9);
+}
+
+static bool c_load_word(u32 rd, u32 rs1, u32 off) {
+    bool err = false;
+    if (!callsan_can_load(rs1)) return true;
+
+    u32 addr = g_regs[rs1] + off;
+    g_regs[rd] = LOAD(addr, 4, &err);
+    if (err) {
+        g_runtime_error_params[0] = addr;
+        g_runtime_error_type = ERROR_LOAD;
+        return true;
+    }
+
+    if (!callsan_check_load(addr, 4)) {
+        g_runtime_error_params[0] = addr;
+        g_runtime_error_type = ERROR_CALLSAN_LOAD_STACK;
+        return true;
+    }
+
+    g_pc += 2;
+    g_reg_written = rd;
+    callsan_store(rd);
+    return true;
+}
+
+static bool c_store_word(u32 rs2, u32 rs1, u32 off) {
+    bool err = false;
+    if (!callsan_can_load(rs1)) return true;
+    if (!callsan_can_load(rs2)) return true;
+
+    u32 addr = g_regs[rs1] + off;
+    STORE(addr, g_regs[rs2], 4, &err);
+    if (err) {
+        g_runtime_error_params[0] = addr;
+        g_runtime_error_type = ERROR_STORE;
+        return true;
+    }
+
+    callsan_report_store(addr, 4, rs2);
+    g_pc += 2;
+    return true;
+}
+
+static bool emulate_compressed(u16 inst) {
+    u32 opcode = extr(inst, 1, 0);
+    u32 funct3 = extr(inst, 15, 13);
+
+    if (opcode == 0b00) {
+        if (funct3 == 0b000) {  // c.addi4spn
+            u32 rd = c_reg(extr(inst, 4, 2));
+            u32 nzuimm = c_addi4spn_nzuimm(inst);
+            if (nzuimm == 0) return false;
+            if (!callsan_can_load(REG_SP)) return true;
+
+            g_regs[rd] = g_regs[REG_SP] + nzuimm;
+            g_pc += 2;
+            g_reg_written = rd;
+            callsan_store(rd);
+            return true;
+        }
+        if (funct3 == 0b010) {  // c.lw
+            return c_load_word(c_reg(extr(inst, 4, 2)), c_reg(extr(inst, 9, 7)),
+                               c_lw_sw_off(inst));
+        }
+        if (funct3 == 0b110) {  // c.sw
+            return c_store_word(c_reg(extr(inst, 4, 2)),
+                                c_reg(extr(inst, 9, 7)), c_lw_sw_off(inst));
+        }
+        return false;
+    }
+
+    if (opcode == 0b01) {
+        if (funct3 == 0b000) {  // c.addi / c.nop
+            u32 rd = extr(inst, 11, 7);
+            i32 nzimm = c_imm6(inst);
+            if (rd == 0) {
+                if (nzimm != 0) return false;
+                g_pc += 2;
+                return true;
+            }
+            if (nzimm == 0) return false;
+            if (!callsan_can_load(rd)) return true;
+
+            g_regs[rd] += nzimm;
+            g_pc += 2;
+            g_reg_written = rd;
+            callsan_store(rd);
+            return true;
+        }
+        if (funct3 == 0b001) {  // c.jal
+            g_regs[REG_RA] = g_pc + 2;
+            g_reg_written = REG_RA;
+            callsan_store(REG_RA);
+            g_pc += c_jump_off(inst);
+            callsan_call();
+            return true;
+        }
+        if (funct3 == 0b010) {  // c.li
+            u32 rd = extr(inst, 11, 7);
+            if (rd == 0) return false;
+
+            g_regs[rd] = c_imm6(inst);
+            g_pc += 2;
+            g_reg_written = rd;
+            callsan_store(rd);
+            return true;
+        }
+        if (funct3 == 0b011) {  // c.addi16sp / c.lui
+            u32 rd = extr(inst, 11, 7);
+            if (rd == REG_SP) {
+                i32 nzimm = c_addi16sp_nzimm(inst);
+                if (nzimm == 0) return false;
+                if (!callsan_can_load(REG_SP)) return true;
+
+                g_regs[REG_SP] += nzimm;
+                g_pc += 2;
+                g_reg_written = REG_SP;
+                callsan_store(REG_SP);
+                return true;
+            }
+
+            i32 nzimm = c_imm6(inst);
+            if (rd == 0 || nzimm == 0) return false;
+            g_regs[rd] = (u32)(nzimm << 12);
+            g_pc += 2;
+            g_reg_written = rd;
+            callsan_store(rd);
+            return true;
+        }
+        if (funct3 == 0b100) {
+            u32 funct2 = extr(inst, 11, 10);
+            u32 rd = c_reg(extr(inst, 9, 7));
+
+            if (funct2 == 0b00 || funct2 == 0b01) {  // c.srli / c.srai
+                if (extr(inst, 12, 12) != 0) return false;
+                u32 shamt = extr(inst, 6, 2);
+                if (shamt == 0) return false;
+                if (!callsan_can_load(rd)) return true;
+
+                if (funct2 == 0b00) g_regs[rd] >>= shamt;
+                else g_regs[rd] = (u32)((i32)g_regs[rd] >> shamt);
+                g_pc += 2;
+                g_reg_written = rd;
+                callsan_store(rd);
+                return true;
+            }
+            if (funct2 == 0b10) {  // c.andi
+                if (!callsan_can_load(rd)) return true;
+
+                g_regs[rd] &= c_imm6(inst);
+                g_pc += 2;
+                g_reg_written = rd;
+                callsan_store(rd);
+                return true;
+            }
+            if (funct2 == 0b11) {  // c.sub / c.xor / c.or / c.and
+                if (extr(inst, 12, 12) != 0) return false;
+                u32 rs2 = c_reg(extr(inst, 4, 2));
+                u32 op = extr(inst, 6, 5);
+                if (!callsan_can_load(rd)) return true;
+                if (!callsan_can_load(rs2)) return true;
+
+                if (op == 0b00) g_regs[rd] -= g_regs[rs2];       // c.sub
+                else if (op == 0b01) g_regs[rd] ^= g_regs[rs2];  // c.xor
+                else if (op == 0b10) g_regs[rd] |= g_regs[rs2];  // c.or
+                else g_regs[rd] &= g_regs[rs2];                  // c.and
+                g_pc += 2;
+                g_reg_written = rd;
+                callsan_store(rd);
+                return true;
+            }
+            return false;
+        }
+        if (funct3 == 0b101) {  // c.j
+            g_pc += c_jump_off(inst);
+            return true;
+        }
+        if (funct3 == 0b110 || funct3 == 0b111) {  // c.beqz / c.bnez
+            u32 rs1 = c_reg(extr(inst, 9, 7));
+            if (!callsan_can_load(rs1)) return true;
+
+            bool take = g_regs[rs1] == 0;
+            if (funct3 == 0b111) take = !take;
+            g_pc += take ? c_branch_off(inst) : 2;
+            return true;
+        }
+        return false;
+    }
+
+    if (opcode == 0b10) {
+        if (funct3 == 0b000) {  // c.slli
+            if (extr(inst, 12, 12) != 0) return false;
+            u32 rd = extr(inst, 11, 7);
+            u32 shamt = extr(inst, 6, 2);
+            if (rd == 0 || shamt == 0) return false;
+            if (!callsan_can_load(rd)) return true;
+
+            g_regs[rd] <<= shamt;
+            g_pc += 2;
+            g_reg_written = rd;
+            callsan_store(rd);
+            return true;
+        }
+        if (funct3 == 0b010) {  // c.lwsp
+            u32 rd = extr(inst, 11, 7);
+            if (rd == 0) return false;
+            return c_load_word(rd, REG_SP, c_lwsp_off(inst));
+        }
+        if (funct3 == 0b100) {
+            u32 rd = extr(inst, 11, 7);
+            u32 rs2 = extr(inst, 6, 2);
+
+            if (extr(inst, 12, 12) == 0) {
+                if (rs2 == 0) {  // c.jr
+                    if (rd == 0) return false;
+                    if (!callsan_can_load(rd)) return true;
+                    if (rd == REG_RA && !callsan_ret()) return true;
+                    g_pc = g_regs[rd] & ~1u;
+                    return true;
+                }
+                if (rd == 0) return false;
+                if (!callsan_can_load(rs2)) return true;
+
+                g_regs[rd] = g_regs[rs2];
+                g_pc += 2;
+                g_reg_written = rd;
+                callsan_store(rd);
+                return true;
+            }
+
+            if (rs2 == 0) {
+                if (rd == 0) {  // c.ebreak
+                    g_got_breakpoint = 1;
+                    g_pc += 2;
+                    return true;
+                }
+                if (!callsan_can_load(rd)) return true;
+                u32 target = g_regs[rd] & ~1u;
+
+                g_regs[REG_RA] = g_pc + 2;
+                g_reg_written = REG_RA;
+                callsan_store(REG_RA);
+                g_pc = target;
+                callsan_call();
+                return true;
+            }
+
+            if (rd == 0) return false;
+            if (!callsan_can_load(rd)) return true;
+            if (!callsan_can_load(rs2)) return true;
+
+            g_regs[rd] += g_regs[rs2];
+            g_pc += 2;
+            g_reg_written = rd;
+            callsan_store(rd);
+            return true;
+        }
+        if (funct3 == 0b110) {  // c.swsp
+            return c_store_word(extr(inst, 6, 2), REG_SP, c_swsp_off(inst));
+        }
+        return false;
+    }
+
+    return false;
+}
+
 void emulate(void) {
     g_runtime_error_type = ERROR_NONE;
     g_mem_written_len = 0;
@@ -288,6 +591,22 @@ void emulate(void) {
             int intno = __builtin_ctz(pending);
             emulator_deliver_interrupt(CAUSE_INTERRUPT | intno);
         }
+    }
+
+    u32 halfword = LOAD(g_pc, 2, &err);
+    if (err) {
+        g_runtime_error_params[0] = g_pc;
+        g_runtime_error_type = ERROR_FETCH;
+        return;
+    }
+
+    // compressed instructions are 16-bit and must be handled separately
+    if ((halfword & 0b11) != 0b11) {
+        if (!emulate_compressed((u16)halfword)) {
+            g_runtime_error_params[0] = g_pc;
+            g_runtime_error_type = ERROR_UNHANDLED_INSN;
+        }
+        return;
     }
 
     u32 inst = LOAD(g_pc, 4, &err);
@@ -660,6 +979,256 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
             buf[pos++] = tmp[_i];                              \
     } while (0)
 
+#define APPEND_REG(r)    \
+    do {                 \
+        APPEND_STR("x"); \
+        APPEND_U32(r);   \
+    } while (0)
+
+    if ((inst & 0b11) != 0b11) {
+        u16 cinst = (u16)inst;
+        u32 copcode = extr(cinst, 1, 0);
+        u32 cfunct3 = extr(cinst, 15, 13);
+
+        if (copcode == 0b00) {
+            if (cfunct3 == 0b000) {
+                if (c_addi4spn_nzuimm(cinst) == 0) {
+                    APPEND_STR("<c.addi4spn with imm 0: reserved>");
+                    goto done;
+                }
+                APPEND_STR("c.addi4spn ");
+                APPEND_REG(c_reg(extr(cinst, 4, 2)));
+                APPEND_STR(", ");
+                APPEND_U32(c_addi4spn_nzuimm(cinst));
+                goto done;
+            }
+            if (cfunct3 == 0b010) {
+                APPEND_STR("c.lw ");
+                APPEND_REG(c_reg(extr(cinst, 4, 2)));
+                APPEND_STR(", ");
+                APPEND_U32(c_lw_sw_off(cinst));
+                APPEND_STR("(");
+                APPEND_REG(c_reg(extr(cinst, 9, 7)));
+                APPEND_STR(")");
+                goto done;
+            }
+            if (cfunct3 == 0b110) {
+                APPEND_STR("c.sw ");
+                APPEND_REG(c_reg(extr(cinst, 4, 2)));
+                APPEND_STR(", ");
+                APPEND_U32(c_lw_sw_off(cinst));
+                APPEND_STR("(");
+                APPEND_REG(c_reg(extr(cinst, 9, 7)));
+                APPEND_STR(")");
+                goto done;
+            }
+        } else if (copcode == 0b01) {
+            if (cfunct3 == 0b000) {
+                u32 crd = extr(cinst, 11, 7);
+                i32 imm = c_imm6(cinst);
+                if (crd == 0 && imm == 0) {
+                    APPEND_STR("c.nop");
+                    goto done;
+                }
+                if (crd == 0) {
+                    APPEND_STR("c.nop ");
+                    APPEND_U32_HEX(imm);
+                    goto done;
+                }
+                if (imm == 0) {
+                    APPEND_STR("<hint>");
+                    goto done;
+                }
+                APPEND_STR("c.addi ");
+                APPEND_REG(crd);
+                APPEND_STR(", ");
+                APPEND_I32(imm);
+                goto done;
+            }
+            if (cfunct3 == 0b001) {
+                APPEND_STR("c.jal ");
+                APPEND_I32(c_jump_off(cinst));
+                goto done;
+            }
+            if (cfunct3 == 0b010) {
+                if (extr(cinst, 11, 7) == 0) {
+                    APPEND_STR("<hint>");
+                    goto done;
+                }
+                APPEND_STR("c.li ");
+                APPEND_REG(extr(cinst, 11, 7));
+                APPEND_STR(", ");
+                APPEND_I32(c_imm6(cinst));
+                goto done;
+            }
+            if (cfunct3 == 0b011) {
+                u32 crd = extr(cinst, 11, 7);
+                if (crd == 0) {
+                    APPEND_STR("<hint>");
+                    goto done;
+                }
+                if (crd == REG_SP) {
+                    if (c_addi16sp_nzimm(cinst) == 0) {
+                        APPEND_STR("<c.addi16sp with imm 0: reserved>");
+                        goto done;
+                    }
+                    APPEND_STR("c.addi16sp sp, ");
+                    APPEND_I32(c_addi16sp_nzimm(cinst));
+                } else {
+                    if (c_imm6(cinst) == 0) {
+                        APPEND_STR("<c.lui with imm 0: reserved>");
+                        goto done;
+                    }
+                    APPEND_STR("c.lui ");
+                    APPEND_REG(crd);
+                    APPEND_STR(", ");
+                    APPEND_I32(c_imm6(cinst));
+                }
+                goto done;
+            }
+            if (cfunct3 == 0b100) {
+                u32 funct2 = extr(cinst, 11, 10);
+                u32 crd = c_reg(extr(cinst, 9, 7));
+
+                if (funct2 == 0b00 || funct2 == 0b01) {
+                    if (extr(cinst, 6, 2) == 0) {
+                        APPEND_STR("<right shift with imm 0: hint>");
+                        goto done;
+                    }
+                    if (extr(cinst, 12, 12) == 1) {
+                        APPEND_STR("<right shift with imm >= 32: reserved>");
+                        goto done;
+                    }
+
+                    APPEND_STR(funct2 == 0b00 ? "c.srli " : "c.srai ");
+                    APPEND_REG(crd);
+                    APPEND_STR(", ");
+                    APPEND_U32(extr(cinst, 6, 2));
+
+                    goto done;
+                }
+                if (funct2 == 0b10) {
+                    APPEND_STR("c.andi ");
+                    APPEND_REG(crd);
+                    APPEND_STR(", ");
+                    APPEND_I32(c_imm6(cinst));
+                    goto done;
+                }
+                if (funct2 == 0b11) {
+                    // TODO: clean this up
+                    if (extr(cinst, 12, 12) == 1) {
+                        APPEND_STR("<unsupported>");  // c.sub vs c.subw
+                        goto done;
+                    }
+                    u32 op = extr(cinst, 6, 5);
+                    if (op == 0b00) APPEND_STR("c.sub ");
+                    else if (op == 0b01) APPEND_STR("c.xor ");
+                    else if (op == 0b10) APPEND_STR("c.or ");
+                    else APPEND_STR("c.and ");
+                    APPEND_REG(crd);
+                    APPEND_STR(", ");
+                    APPEND_REG(c_reg(extr(cinst, 4, 2)));
+                    goto done;
+                }
+            }
+            if (cfunct3 == 0b101) {
+                APPEND_STR("c.j ");
+                APPEND_I32(c_jump_off(cinst));
+                goto done;
+            }
+            if (cfunct3 == 0b110 || cfunct3 == 0b111) {
+                APPEND_STR(cfunct3 == 0b110 ? "c.beqz " : "c.bnez ");
+                APPEND_REG(c_reg(extr(cinst, 9, 7)));
+                APPEND_STR(", ");
+                APPEND_I32(c_branch_off(cinst));
+                goto done;
+            }
+        } else if (copcode == 0b10) {
+            if (cfunct3 == 0b000) {
+                if (extr(cinst, 11, 7) == 0) {
+                    APPEND_STR("<c.slli with reg 0: hint>");
+                    goto done;
+                }
+                if (extr(cinst, 6, 2) == 0) {
+                    APPEND_STR("<c.slli with imm 0: hint>");
+                    goto done;
+                }
+                if (extr(cinst, 12, 12) == 1) {
+                    APPEND_STR("<c.slli with imm >= 32: reserved>");
+                    goto done;
+                }
+                APPEND_STR("c.slli ");
+                APPEND_REG(extr(cinst, 11, 7));
+                APPEND_STR(", ");
+                APPEND_U32(extr(cinst, 6, 2));
+                goto done;
+            }
+            if (cfunct3 == 0b010) {
+                if (extr(cinst, 11, 7) == 0) {
+                    APPEND_STR("<c.lwsp with rd 0: reserved>");
+                    goto done;
+                }
+                APPEND_STR("c.lwsp ");
+                APPEND_REG(extr(cinst, 11, 7));
+                APPEND_STR(", ");
+                APPEND_U32(c_lwsp_off(cinst));
+                goto done;
+            }
+            if (cfunct3 == 0b100) {
+                u32 crd = extr(cinst, 11, 7);
+                u32 crs2 = extr(cinst, 6, 2);
+                if (extr(cinst, 12, 12) == 0) {
+                    if (crs2 == 0) {
+                        if (crd == 0) {
+                            APPEND_STR("<c.jr x0: reserved>");
+                            goto done;
+                        }
+                        APPEND_STR("c.jr ");
+                        APPEND_REG(crd);
+                    } else {
+                        if (crd == 0) {
+                            APPEND_STR("<c.mv x0: hint>");
+                            goto done;
+                        }
+                        APPEND_STR("c.mv ");
+                        APPEND_REG(crd);
+                        APPEND_STR(", ");
+                        APPEND_REG(crs2);
+                    }
+                    goto done;
+                }
+                if (crs2 == 0) {
+                    if (crd == 0) {
+                        APPEND_STR("c.ebreak");
+                    } else {
+                        APPEND_STR("c.jalr ");
+                        APPEND_REG(crd);
+                    }
+                    goto done;
+                }
+                if (crd == 0) {
+                    APPEND_STR("<c.add x0: hint>");
+                    goto done;
+                }
+                APPEND_STR("c.add ");
+                APPEND_REG(crd);
+                APPEND_STR(", ");
+                APPEND_REG(crs2);
+                goto done;
+            }
+            if (cfunct3 == 0b110) {
+                APPEND_STR("c.swsp ");
+                APPEND_REG(extr(cinst, 6, 2));
+                APPEND_STR(", ");
+                APPEND_U32(c_swsp_off(cinst));
+                goto done;
+            }
+        }
+
+        APPEND_STR("<unhandled compressed>");
+        goto done;
+    }
+
     // LUI
     if (opcode == 0b0110111) {
         // it has been requested to be compatible with RARS here
@@ -694,10 +1263,6 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
 
     // JALR
     if (opcode == 0b1100111) {
-        if (funct3 != 0) {
-            APPEND_STR("<invalid jalr funct3>");
-            goto done;
-        }
         APPEND_STR("jalr x");
         APPEND_U32(rd);
         APPEND_STR(", x");
@@ -847,9 +1412,9 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
 
         if (funct3 == 0b000) {
             const char *name;
-            if (inst == 0x10200073) name = "sret";
-            else if (inst == 0x00000073) name = "ecall";
-            else if (inst == 0x00100073) name = "ebreak";
+            if (itype == 0x102) name = "sret";
+            else if (itype == 0) name = "ecall";
+            else if (itype == 1) name = "ebreak";
             else {
                 APPEND_STR("<unhandled system instruction>");
                 goto done;
@@ -903,8 +1468,6 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
             APPEND_U32_HEX(csr);
             APPEND_STR(", ");
             APPEND_U32(rs1);
-        } else {
-            APPEND_STR("<unhandled SYSTEM>");
         }
         goto done;
     }

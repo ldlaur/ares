@@ -38,6 +38,15 @@ static inline void shadowstack_pop() {}
 #define emu_exit() g_exited = true
 #endif
 
+// end is inclusive, like in Verilog
+static inline u32 extr(u32 val, u32 end, u32 start) {
+    assert(end <= 31 && start <= end);
+    // start=0 end=31 means end+1-start=32, and shifting an u32 by 32 is UB
+    if (start == 0 && end == 31) return val;
+    u32 mask = (1u << (end + 1 - start)) - 1;
+    return (val >> start) & mask;
+}
+
 #define TEXT_BASE 0x00400000
 #define TEXT_END 0x10000000
 #define DATA_BASE 0x10000000

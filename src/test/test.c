@@ -644,13 +644,13 @@ void test_runtime_exit(void) {
     TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
 }
 
-// 16bit instruction, currently unhandled
+// sd x0, 0(x0): 64 bit instruction, currently unhandled
 void test_runtime_unhandled(void) {
     build_and_run(
         "\
 .globl _start   \n\
 _start:         \n\
-E:  .word 0b01  \n\
+E:  .word 0x00003023  \n\
 ");
     TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_UNHANDLED_INSN);
     check_pc_at_label("E");
