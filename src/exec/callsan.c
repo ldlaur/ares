@@ -7,8 +7,10 @@ export u32 g_reg_bitmap;
 export u32 g_reg_bitmap_ever_written;
 ARES_ARRAY(ShadowStackEnt) g_shadow_stack = ARES_ARRAY_NEW(ShadowStackEnt);
 export u8 g_callsan_stack_written_by[STACK_LEN / 4];
+bool g_callsan_on = false;
 
 void callsan_init(void) {
+    g_callsan_on = true;
     memset(g_callsan_stack_written_by, 0xFF,
            sizeof(g_callsan_stack_written_by));
     g_reg_bitmap = (1ul << REG_ZERO) | (1ul << REG_SP) | (1ul << REG_TP) |
@@ -22,6 +24,7 @@ void callsan_init(void) {
 }
 
 bool callsan_can_load(int reg) {
+    if (!g_callsan_on) return true;
     if (reg == 0) return true;
     if (((g_reg_bitmap >> reg) & 1) == 0) {
         // there are still two causes:
@@ -37,6 +40,7 @@ bool callsan_can_load(int reg) {
 }
 
 void callsan_store(int reg) {
+    if (!g_callsan_on) return;
     g_reg_bitmap |= 1u << reg;
     g_reg_bitmap_ever_written |= 1u << reg;
 }
@@ -59,6 +63,7 @@ const u32 CALLSAN_CALL_CLOBBERED =
     (1u << REG_A7);
 
 void callsan_call(void) {
+    if (!g_callsan_on) return;
     ShadowStackEnt *e = ARES_ARRAY_PUSH(&g_shadow_stack);
     e->sregs[0] = g_regs[REG_FP];
     e->sregs[1] = g_regs[REG_S1];
@@ -75,6 +80,7 @@ void callsan_call(void) {
 }
 
 bool callsan_ret(void) {
+    if (!g_callsan_on) return true;
     if (ARES_ARRAY_LEN(&g_shadow_stack) == 0) {
         g_runtime_error_type = ERROR_CALLSAN_RET_EMPTY;
         return false;
@@ -121,6 +127,7 @@ bool callsan_ret(void) {
 }
 
 void callsan_report_store(u32 addr, u32 size, int reg) {
+    if (!g_callsan_on) return;
     bool in_stack = addr >= STACK_TOP - STACK_LEN && addr + size <= STACK_TOP;
     if (!in_stack) return;
     u32 off = addr - (STACK_TOP - STACK_LEN);
@@ -131,6 +138,7 @@ void callsan_report_store(u32 addr, u32 size, int reg) {
 }
 
 bool callsan_check_load(u32 addr, u32 size) {
+    if (!g_callsan_on) return true;
     bool in_stack = addr >= STACK_TOP - STACK_LEN && addr + size <= STACK_TOP;
     if (!in_stack) return true;
     u32 off = addr - (STACK_TOP - STACK_LEN);

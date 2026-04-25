@@ -507,39 +507,48 @@ static bool make_strtab(char **out, size_t *out_sz, bool inc_externs,
 }
 
 static bool make_symtab(u8 **out, size_t *out_sz, size_t *ent_num,
-                        size_t name_off, char **error) {
-    size_t symtab_sz =
-        sizeof(ElfSymtabEntry) *
-        (1 + ARES_ARRAY_LEN(&g_externs) + ARES_ARRAY_LEN(&g_globals));
-    ElfSymtabEntry *symtab = malloc(symtab_sz);
+                        size_t *first_global_idx, size_t name_off_externs,
+                        char **error) {
+    size_t total = 1 + ARES_ARRAY_LEN(&g_local_labels) +
+                   ARES_ARRAY_LEN(&g_externs) + ARES_ARRAY_LEN(&g_globals);
+
+    ElfSymtabEntry *symtab = calloc(total, sizeof(ElfSymtabEntry));
     ARES_CHECK_OOM(symtab);
 
-    ElfSymtabEntry null_e = {0};
-    null_e.shent_idx = SHN_UNDEF;
-    symtab[0] = null_e;
+    symtab[0].shent_idx = SHN_UNDEF;
 
-    size_t symtab_i = 1;
+    size_t si = 1;
 
-    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_externs); i++, symtab_i++) {
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_local_labels); i++) {
+        LocalLabel *lbl = ARES_ARRAY_GET(&g_local_labels, i);
+        lbl->elf_stidx = si;
+        symtab[si].name_off = 0;
+        symtab[si].info = ELF32_ST_INFO(STB_LOCAL, STT_NOTYPE);
+        symtab[si].other = 0;
+        symtab[si].shent_idx = (u16)lbl->section->elf.shidx;
+        symtab[si].value = lbl->offset;
+        symtab[si].size = 0;
+        si++;
+    }
+    *first_global_idx = si;
+
+    size_t name_off = name_off_externs;
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_externs); i++, si++) {
         Extern *e = ARES_ARRAY_GET(&g_externs, i);
-        ElfSymtabEntry *sym = &symtab[symtab_i];
-        e->elf.stidx = symtab_i;
-        sym->name_off = name_off;
-        sym->shent_idx = SHN_UNDEF;
-        sym->other = 0;
-        sym->size = 0;
-        sym->value = 0;
-        sym->info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+        e->elf.stidx = si;
+
+        symtab[si].name_off = name_off;
+        symtab[si].info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+        symtab[si].other = 0;
+        symtab[si].shent_idx = SHN_UNDEF;
+        symtab[si].value = 0;
+        symtab[si].size = 0;
         name_off += e->len + 1;
     }
 
-    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_globals); i++, symtab_i++) {
+    for (size_t i = 0; i < ARES_ARRAY_LEN(&g_globals); i++, si++) {
         Global *g = ARES_ARRAY_GET(&g_globals, i);
-        ElfSymtabEntry *sym = &symtab[symtab_i];
-        g->elf.stidx = symtab_i;
-        sym->name_off = name_off;
-        sym->other = 0;
-        sym->size = 0;
+        g->elf.stidx = si;
 
         u32 addr = 0;
         Section *sec = NULL;
@@ -549,16 +558,18 @@ static bool make_symtab(u8 **out, size_t *out_sz, size_t *ent_num,
             goto fail;
         }
 
-        sym->shent_idx = sec->elf.shidx;
-        sym->value = addr - sec->base;
-        sym->info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+        symtab[si].name_off = name_off;
+        symtab[si].info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+        symtab[si].other = 0;
+        symtab[si].shent_idx = (u16)sec->elf.shidx;
+        symtab[si].value = addr - sec->base;
+        symtab[si].size = 0;
         name_off += g->len + 1;
     }
 
     *out = (u8 *)symtab;
-    *out_sz = symtab_sz;
-
-    *ent_num = symtab_i;
+    *out_sz = total * sizeof(ElfSymtabEntry);
+    *ent_num = si;
     return true;
 
 fail:
@@ -575,7 +586,7 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
         rela_count += s->relocations.len;
     }
 
-    ElfRelaEntry *relas = malloc(sizeof(ElfRelaEntry) * rela_count);
+    ElfRelaEntry *relas = calloc(rela_count, sizeof(ElfRelaEntry));
     ARES_CHECK_OOM(relas);
 
     // NOTE: this works because it assumes that section headers have been palced
@@ -587,9 +598,8 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
     size_t rel_i = 0;
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
         Section *s = *ARES_ARRAY_GET(&g_sections, i);
-        if (!s->physical || 0 == s->contents.len || 0 == s->relocations.len) {
+        if (!s->physical || 0 == s->contents.len || 0 == s->relocations.len)
             continue;
-        }
 
         ElfSectionHeader *rela_shdr = &shdrs[reloc_idx];
         rela_shdr->off = file_off + rel_i * sizeof(ElfRelaEntry);
@@ -601,7 +611,13 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
 
             rela->offset = r->offset;
             rela->addend = r->addend;
-            rela->info = ELF32_R_INFO(r->symbol->elf.stidx, r->type);
+
+            u32 sym_idx;
+            if (r->kind == RELOCATION_KIND_EXTERN)
+                sym_idx = r->symbol->elf.stidx;
+            else sym_idx = g_local_labels.buf[r->local_label_idx].elf_stidx;
+
+            rela->info = ELF32_R_INFO(sym_idx, r->type);
             rela_shdr->mem_sz += sizeof(ElfRelaEntry);
         }
         reloc_idx++;
@@ -610,10 +626,6 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
     *out = (u8 *)relas;
     *out_sz = rela_count * sizeof(ElfRelaEntry);
     return true;
-
-    // fail:
-    //     free(relas);
-    //     return false;
 }
 
 bool elf_emit_exec(void **out, size_t *len, char **error) {
@@ -713,6 +725,7 @@ bool elf_emit_obj(void **out, size_t *len, char **error) {
     size_t reloc_num = 0;
     size_t symtab_sz = 0;
     size_t symtab_entnum = 0;
+    size_t first_global = 0;
     size_t relas_sz = 0;
 
     ARES_CHECK_CALL(make_strtab(&strtab, &strtab_sz, true, true, error), fail);
@@ -721,9 +734,9 @@ bool elf_emit_obj(void **out, size_t *len, char **error) {
                   &phnum, &shnum, &reloc_idx, &reloc_num, sizeof(ElfHeader), 2,
                   2, false, true, error),
         fail);
-    ARES_CHECK_CALL(
-        make_symtab(&symtab, &symtab_sz, &symtab_entnum, name_off, error),
-        fail);
+    ARES_CHECK_CALL(make_symtab(&symtab, &symtab_sz, &symtab_entnum,
+                                &first_global, name_off, error),
+                    fail);
 
     ElfSectionHeader *shdrs = (ElfSectionHeader *)(core + shdrs_start);
     ARES_CHECK_CALL(
@@ -762,17 +775,19 @@ bool elf_emit_obj(void **out, size_t *len, char **error) {
                                   .align = 1,
                                   .link = 0,
                                   .ent_sz = 0};
-    shdrs[2] =
-        (ElfSectionHeader){.name_off = STRTAB_ISYM,
-                           .type = SHT_SYMTAB,
-                           .flags = SHF_INFO_LINK,
-                           .info = 1,
-                           .off = sizeof(ElfHeader) + core_sz + strtab_sz,
-                           .virt_addr = 0,
-                           .mem_sz = symtab_sz,
-                           .align = 1,
-                           .link = 1,
-                           .ent_sz = sizeof(ElfSymtabEntry)};
+
+    shdrs[2] = (ElfSectionHeader){
+        .name_off = STRTAB_ISYM,
+        .type = SHT_SYMTAB,
+        .flags = SHF_INFO_LINK,
+        .info = (u32)first_global,
+        .off = sizeof(ElfHeader) + core_sz + strtab_sz,
+        .virt_addr = 0,
+        .mem_sz = symtab_sz,
+        .align = 4,
+        .link = 1,
+        .ent_sz = sizeof(ElfSymtabEntry),
+    };
 
     elf_contents =
         malloc(sizeof(ElfHeader) + core_sz + strtab_sz + symtab_sz + relas_sz);

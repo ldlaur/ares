@@ -141,5 +141,5 @@ RegisterExpression {
   }
   hex { @digit | $[a-fA-F] }
   Number { "-"? (@digit+ | "0x" hex+ | "0b" $[01]+) }
-  Directive { ".data" | ".text" | ".globl" | ".byte" | ".half" | ".word" | ".ascii" | ".asciz" | ".string" }
+  Directive { ".data" | ".text" | ".globl" | ".byte" | ".half" | ".word" | ".ascii" | ".asciz" | ".string" | "%pcrel_lo" | "%pcrel_hi" | "%hi" | "%lo" }
 }

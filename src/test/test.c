@@ -621,6 +621,40 @@ foo:\n\
     TEST_ASSERT_EQUAL_INT(g_text->by_linenum.len, 7 * 4);
 }
 
+void test_hi_lo_int(void) {
+    bool err;
+    u32 expected_lui, expected_addi;
+    assemble_line("li a0, 123456\n");
+    expected_lui = LOAD(g_text->base, 4, &err);
+    expected_addi = LOAD(g_text->base + 4, 4, &err);
+    free_runtime();
+    g_error = NULL;
+    assemble_line("lui a0, %hi(123456)\naddi a0, a0, %lo(123456)\n");
+    TEST_ASSERT_EQUAL_INT(expected_lui, LOAD(g_text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(expected_addi, LOAD(g_text->base + 4, 4, &err));
+}
+
+void test_hi_lo_label(void) {
+    bool err;
+    u32 expected_lui, expected_addi;
+    assemble_line("li a0, 0x00400008\n");
+    expected_lui = LOAD(g_text->base, 4, &err);
+    expected_addi = LOAD(g_text->base + 4, 4, &err);
+    free_runtime();
+    assemble_line("lui a0, %hi(label)\naddi a0, a0, %lo(label)\nlabel:");
+    TEST_ASSERT_EQUAL_INT(expected_lui, LOAD(g_text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(expected_addi, LOAD(g_text->base + 4, 4, &err));
+}
+
+void test_la_vs_pcrel(void) {
+    bool err;
+    u32 expected_auipc, expected_addi;
+    assemble_line(
+        "l0: auipc a0, %pcrel_hi(label)\naddi a0, a0, %pcrel_lo(l0)\nlabel:");
+    TEST_ASSERT_EQUAL_INT(0x517, LOAD(g_text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(0x00850513, LOAD(g_text->base + 4, 4, &err));
+}
+
 // -- runtime tests
 
 void build_and_run(const char *txt) {

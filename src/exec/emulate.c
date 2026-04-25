@@ -165,7 +165,7 @@ void do_syscall(void) {
     u32 scause = CAUSE_U_ECALL;
     if (g_privilege_level == PRIV_SUPERVISOR) scause = CAUSE_S_ECALL;
 
-    if (!ARES_ARRAY_IS_EMPTY(&g_kernel_text->contents)) {
+    if (g_kernel_text && !ARES_ARRAY_IS_EMPTY(&g_kernel_text->contents)) {
         emulator_deliver_interrupt(scause);
         return;
     }
