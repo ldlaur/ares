@@ -534,6 +534,14 @@ int parse_reg(Parser *p) {
 }
 
 int parse_csr(Parser *p) {
+    Parser start = *p;
+    i32 value;
+    if (parse_numeric(p, &value)) {
+        if (value >= 0 && value <= 0xfff) return value;
+        *p = start;
+        return -1;
+    }
+
     const char *str;
     size_t len;
     parse_ident(p, &str, &len);
@@ -738,6 +746,7 @@ const char *label(Parser *p, Parser *orig, DeferredInsnCb *cb,
                   const char *opcode, size_t opcode_len, u32 *out_addr,
                   bool *later, DeferredInsnReloc *reloc) {
     *later = false;
+
     const char *target;
     size_t target_len;
     parse_ident(p, &target, &target_len);
@@ -766,6 +775,23 @@ const char *label(Parser *p, Parser *orig, DeferredInsnCb *cb,
     insn->section = g_section;
     *later = true;
     return NULL;
+}
+
+const char *pc_relative_target(Parser *p, Parser *orig, DeferredInsnCb *cb,
+                               const char *opcode, size_t opcode_len,
+                               u32 *out_addr, bool *later,
+                               DeferredInsnReloc *reloc) {
+    *later = false;
+
+    i32 off;
+    Parser fallback = *p;
+    if (parse_numeric(p, &off)) {
+        *out_addr = (u32)(g_section->emit_idx + g_section->base + off);
+        return NULL;
+    }
+    *p = fallback;
+
+    return label(p, orig, cb, opcode, opcode_len, out_addr, later, reloc);
 }
 
 const char *parse_modifier_hi(Parser *p, Parser orig, DeferredInsnCb *cb,
@@ -1031,6 +1057,21 @@ const char *handle_ldst(Parser *p, const char *opcode, size_t opcode_len) {
     return NULL;
 }
 
+static u32 branch_inst(const char *opcode, size_t opcode_len, int s1, int s2,
+                       i32 simm) {
+    if (str_eq_case(opcode, opcode_len, "beq")) return BEQ(s1, s2, simm);
+    if (str_eq_case(opcode, opcode_len, "bne")) return BNE(s1, s2, simm);
+    if (str_eq_case(opcode, opcode_len, "blt")) return BLT(s1, s2, simm);
+    if (str_eq_case(opcode, opcode_len, "bge")) return BGE(s1, s2, simm);
+    if (str_eq_case(opcode, opcode_len, "bltu")) return BLTU(s1, s2, simm);
+    if (str_eq_case(opcode, opcode_len, "bgeu")) return BGEU(s1, s2, simm);
+    if (str_eq_case(opcode, opcode_len, "bgt")) return BLT(s2, s1, simm);
+    if (str_eq_case(opcode, opcode_len, "ble")) return BGE(s2, s1, simm);
+    if (str_eq_case(opcode, opcode_len, "bgtu")) return BLTU(s2, s1, simm);
+    if (str_eq_case(opcode, opcode_len, "bleu")) return BGEU(s2, s1, simm);
+    return 0;
+}
+
 const char *handle_branch(Parser *p, const char *opcode, size_t opcode_len) {
     Parser orig = *p;
     u32 addr;
@@ -1048,63 +1089,32 @@ const char *handle_branch(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    Parser before_target = *p;
-    i32 simm;
-    if (parse_numeric(p, &simm)) {
-        if (simm >= (1 << 12) || simm < -(1 << 12))
-            return "Branch immediate too large";
-        if (simm & 1) return "Branch target must be even";
-
-        u32 inst = 0;
-        if (str_eq_case(opcode, opcode_len, "beq")) inst = BEQ(s1, s2, simm);
-        else if (str_eq_case(opcode, opcode_len, "bne"))
-            inst = BNE(s1, s2, simm);
-        else if (str_eq_case(opcode, opcode_len, "blt"))
-            inst = BLT(s1, s2, simm);
-        else if (str_eq_case(opcode, opcode_len, "bge"))
-            inst = BGE(s1, s2, simm);
-        else if (str_eq_case(opcode, opcode_len, "bltu"))
-            inst = BLTU(s1, s2, simm);
-        else if (str_eq_case(opcode, opcode_len, "bgeu"))
-            inst = BGEU(s1, s2, simm);
-        else if (str_eq_case(opcode, opcode_len, "bgt"))
-            inst = BLT(s2, s1, simm);
-        else if (str_eq_case(opcode, opcode_len, "ble"))
-            inst = BGE(s2, s1, simm);
-        else if (str_eq_case(opcode, opcode_len, "bgtu"))
-            inst = BLTU(s2, s1, simm);
-        else if (str_eq_case(opcode, opcode_len, "bleu"))
-            inst = BGEU(s2, s1, simm);
-        asm_emit(inst, p->startline);
-        return NULL;
-    }
-    *p = before_target;
-
-    const char *err = label(p, &orig, handle_branch, opcode, opcode_len, &addr,
-                            &later, reloc_branch);
+    const char *err = pc_relative_target(
+        p, &orig, handle_branch, opcode, opcode_len, &addr, &later,
+        reloc_branch);
     if (err) return err;
     if (later) {
         asm_emit(0, p->startline);
         return NULL;
     }
-    simm = addr - (g_section->emit_idx + g_section->base);
+    i32 simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 12) || simm < -(1 << 12))
         return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
 
-    u32 inst = 0;
-    if (str_eq_case(opcode, opcode_len, "beq")) inst = BEQ(s1, s2, simm);
-    else if (str_eq_case(opcode, opcode_len, "bne")) inst = BNE(s1, s2, simm);
-    else if (str_eq_case(opcode, opcode_len, "blt")) inst = BLT(s1, s2, simm);
-    else if (str_eq_case(opcode, opcode_len, "bge")) inst = BGE(s1, s2, simm);
-    else if (str_eq_case(opcode, opcode_len, "bltu")) inst = BLTU(s1, s2, simm);
-    else if (str_eq_case(opcode, opcode_len, "bgeu")) inst = BGEU(s1, s2, simm);
-    else if (str_eq_case(opcode, opcode_len, "bgt")) inst = BLT(s2, s1, simm);
-    else if (str_eq_case(opcode, opcode_len, "ble")) inst = BGE(s2, s1, simm);
-    else if (str_eq_case(opcode, opcode_len, "bgtu")) inst = BLTU(s2, s1, simm);
-    else if (str_eq_case(opcode, opcode_len, "bleu")) inst = BGEU(s2, s1, simm);
-    asm_emit(inst, p->startline);
+    asm_emit(branch_inst(opcode, opcode_len, s1, s2, simm), p->startline);
     return NULL;
+}
+
+static u32 branch_zero_inst(const char *opcode, size_t opcode_len, int s,
+                            i32 simm) {
+    if (str_eq_case(opcode, opcode_len, "beqz")) return BEQ(s, 0, simm);
+    if (str_eq_case(opcode, opcode_len, "bnez")) return BNE(s, 0, simm);
+    if (str_eq_case(opcode, opcode_len, "blez")) return BGE(0, s, simm);
+    if (str_eq_case(opcode, opcode_len, "bgez")) return BGE(s, 0, simm);
+    if (str_eq_case(opcode, opcode_len, "bltz")) return BLT(s, 0, simm);
+    if (str_eq_case(opcode, opcode_len, "bgtz")) return BLT(0, s, simm);
+    return 0;
 }
 
 const char *handle_branch_zero(Parser *p, const char *opcode,
@@ -1120,51 +1130,20 @@ const char *handle_branch_zero(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    Parser before_target = *p;
-    i32 simm;
-    if (parse_numeric(p, &simm)) {
-        if (simm >= (1 << 12) || simm < -(1 << 12))
-            return "Branch immediate too large";
-        if (simm & 1) return "Branch target must be even";
-
-        u32 inst = 0;
-        if (str_eq_case(opcode, opcode_len, "beqz")) inst = BEQ(s, 0, simm);
-        else if (str_eq_case(opcode, opcode_len, "bnez"))
-            inst = BNE(s, 0, simm);
-        else if (str_eq_case(opcode, opcode_len, "blez"))
-            inst = BGE(0, s, simm);
-        else if (str_eq_case(opcode, opcode_len, "bgez"))
-            inst = BGE(s, 0, simm);
-        else if (str_eq_case(opcode, opcode_len, "bltz"))
-            inst = BLT(s, 0, simm);
-        else if (str_eq_case(opcode, opcode_len, "bgtz"))
-            inst = BLT(0, s, simm);
-        asm_emit(inst, p->startline);
-        return NULL;
-    }
-    *p = before_target;
-
-    const char *err = label(p, &orig, handle_branch_zero, opcode, opcode_len,
-                            &addr, &later, reloc_branch);
+    const char *err = pc_relative_target(
+        p, &orig, handle_branch_zero, opcode, opcode_len, &addr, &later,
+        reloc_branch);
     if (err) return err;
     if (later) {
         asm_emit(0, p->startline);
         return NULL;
     }
-    simm = addr - (g_section->emit_idx + g_section->base);
+    i32 simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 12) || simm < -(1 << 12))
         return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
 
-    u32 inst = 0;
-    if (str_eq_case(opcode, opcode_len, "beqz")) inst = BEQ(s, 0, simm);
-    else if (str_eq_case(opcode, opcode_len, "bnez")) inst = BNE(s, 0, simm);
-    else if (str_eq_case(opcode, opcode_len, "blez")) inst = BGE(0, s, simm);
-    else if (str_eq_case(opcode, opcode_len, "bgez")) inst = BGE(s, 0, simm);
-    else if (str_eq_case(opcode, opcode_len, "bltz")) inst = BLT(s, 0, simm);
-    else if (str_eq_case(opcode, opcode_len, "bgtz")) inst = BLT(0, s, simm);
-
-    asm_emit(inst, p->startline);
+    asm_emit(branch_zero_inst(opcode, opcode_len, s, simm), p->startline);
     return NULL;
 }
 
@@ -1216,26 +1195,16 @@ const char *handle_jump(Parser *p, const char *opcode, size_t opcode_len) {
     } else assert(false);
 
     skip_trailing(p);
-    Parser before_target = *p;
-    i32 simm;
-    if (parse_numeric(p, &simm)) {
-        if (simm >= (1 << 20) || simm < -(1 << 20))
-            return "Jump immediate too large";
-        if (simm & 1) return "Jump target must be even";
-        asm_emit(JAL(d, simm), p->startline);
-        return NULL;
-    }
-    *p = before_target;
 
     u32 addr;
-    err = label(p, &orig, handle_jump, opcode, opcode_len, &addr, &later,
-                reloc_jal);
+    err = pc_relative_target(p, &orig, handle_jump, opcode, opcode_len, &addr,
+                             &later, reloc_jal);
     if (err) return err;
     if (later) {
         asm_emit(0, p->startline);
         return NULL;
     }
-    simm = addr - (g_section->emit_idx + g_section->base);
+    i32 simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 20) || simm < -(1 << 20))
         return "Jump immediate too large";
     if (simm & 1) return "Jump target must be even";
@@ -1569,32 +1538,15 @@ const char *handle_c_jump(Parser *p, const char *opcode, size_t opcode_len) {
     bool later;
 
     skip_trailing(p);
-    Parser before_target = *p;
-    i32 simm;
-    if (parse_numeric(p, &simm)) {
-        if (simm >= (1 << 11) || simm < -(1 << 11))
-            return "Jump immediate too large";
-        if (simm & 1) return "Jump target must be even";
-
-        if (str_eq_case(opcode, opcode_len, "c.j")) {
-            asm_emit_16(C_J(simm), p->startline);
-        } else if (str_eq_case(opcode, opcode_len, "c.jal")) {
-            asm_emit_16(C_JAL(simm), p->startline);
-        }
-
-        return NULL;
-    }
-    *p = before_target;
-
-    const char *err = label(p, &orig, handle_c_jump, opcode, opcode_len, &addr,
-                            &later, reloc_c_j);
+    const char *err = pc_relative_target(
+        p, &orig, handle_c_jump, opcode, opcode_len, &addr, &later, reloc_c_j);
     if (err) return err;
     if (later) {
         asm_emit_16(0, p->startline);
         return NULL;
     }
 
-    simm = addr - (g_section->emit_idx + g_section->base);
+    i32 simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= (1 << 11) || simm < -(1 << 11))
         return "Jump immediate too large";
     if (simm & 1) return "Jump target must be even";
@@ -1642,33 +1594,16 @@ const char *handle_c_branch_zero(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    Parser before_target = *p;
-    i32 simm;
-    if (parse_numeric(p, &simm)) {
-        if (simm >= 256 || simm < -256) return "Branch immediate too large";
-        if (simm & 1) return "Branch target must be even";
-
-        cs1 = s1 - 8;
-
-        if (str_eq_case(opcode, opcode_len, "c.beqz")) {
-            asm_emit_16(C_BEQZ(cs1, simm), p->startline);
-        } else if (str_eq_case(opcode, opcode_len, "c.bnez")) {
-            asm_emit_16(C_BNEZ(cs1, simm), p->startline);
-        }
-
-        return NULL;
-    }
-    *p = before_target;
-
-    const char *err = label(p, &orig, handle_c_branch_zero, opcode, opcode_len,
-                            &addr, &later, reloc_branch);
+    const char *err = pc_relative_target(
+        p, &orig, handle_c_branch_zero, opcode, opcode_len, &addr, &later,
+        reloc_branch);
     if (err) return err;
     if (later) {
         asm_emit_16(0, p->startline);
         return NULL;
     }
 
-    simm = addr - (g_section->emit_idx + g_section->base);
+    i32 simm = addr - (g_section->emit_idx + g_section->base);
     if (simm >= 256 || simm < -256) return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
 

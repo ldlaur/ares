@@ -1263,6 +1263,10 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
 
     // JALR
     if (opcode == 0b1100111) {
+        if (funct3 != 0b000) {
+            APPEND_STR("<invalid jalr funct3>");
+            goto done;
+        }
         APPEND_STR("jalr x");
         APPEND_U32(rd);
         APPEND_STR(", x");
@@ -1412,9 +1416,9 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
 
         if (funct3 == 0b000) {
             const char *name;
-            if (itype == 0x102) name = "sret";
-            else if (itype == 0) name = "ecall";
-            else if (itype == 1) name = "ebreak";
+            if (inst == 0x10200073) name = "sret";
+            else if (inst == 0x00000073) name = "ecall";
+            else if (inst == 0x00100073) name = "ebreak";
             else {
                 APPEND_STR("<unhandled system instruction>");
                 goto done;
@@ -1468,6 +1472,8 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
             APPEND_U32_HEX(csr);
             APPEND_STR(", ");
             APPEND_U32(rs1);
+        } else {
+            APPEND_STR("<invalid system funct3>");
         }
         goto done;
     }

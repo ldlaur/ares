@@ -1212,3 +1212,174 @@ void test_sstatus_ecall(void) {
     TEST_ASSERT_FALSE(g_csr[CSR_MSTATUS] & STATUS_SIE);
     TEST_ASSERT_TRUE(g_csr[CSR_MSTATUS] & STATUS_SPIE);
 }
+
+void test_rvc_insn_size(void) {
+    assemble_line("c.nop\nc.nop\n");
+    TEST_ASSERT_EQUAL_INT(g_text->by_linenum.len, 2 + 2);
+}
+
+void test_rvc_mixed_width(void) {
+    assemble_line("c.nop\nnop\nc.nop\n");
+    TEST_ASSERT_EQUAL_INT(g_text->by_linenum.len, 2 + 4 + 2);
+}
+
+void test_rvc_runtime_c_addi(void) {
+    build_and_run(
+        "\
+.globl _start    \n\
+_start:          \n\
+    c.li a0, 10  \n\
+    c.addi a0, 5 \n\
+    li a7, 93    \n\
+    ecall        \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(15U, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_mv(void) {
+    build_and_run(
+        "\
+.globl _start    \n\
+_start:          \n\
+    c.li  a1, 3  \n\
+    c.mv  a0, a1 \n\
+    li a7, 93    \n\
+    ecall        \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(3, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_lw_sw(void) {
+    build_and_run(
+        "\
+.globl _start      \n\
+_start:            \n\
+    la   a0, val   \n\
+    c.li a1, 4     \n\
+    c.sw a1, 0(a0) \n\
+    c.lw a2, 0(a0) \n\
+    li a7, 93      \n\
+    ecall          \n\
+.data              \n\
+    val: .word 0   \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(4, g_regs[REG_A2]);
+}
+
+void test_rvc_runtime_c_j(void) {
+    build_and_run(
+        "\
+.globl _start  \n\
+_start:        \n\
+    c.j  done  \n\
+    c.li a0, 1 \n\
+done:          \n\
+    li a7, 93  \n\
+    ecall      \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(0U, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_beqz(void) {
+    build_and_run(
+        "\
+.globl _start      \n\
+_start:            \n\
+    c.li s0, 0     \n\
+    c.beqz s0, end \n\
+    c.li a0, 7     \n\
+end:               \n\
+    li a7, 93      \n\
+    ecall          \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(0U, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_bnez(void) {
+    build_and_run(
+        "\
+.globl _start      \n\
+_start:            \n\
+    c.li s0, 1     \n\
+    c.bnez s0, end \n\
+    c.li a0, 7     \n\
+end:               \n\
+    li a7, 93      \n\
+    ecall          \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(0U, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_sub(void) {
+    build_and_run(
+        "\
+.globl _start    \n\
+_start:          \n\
+    c.li s0, 10  \n\
+    c.li s1, 3   \n\
+    c.sub s0, s1 \n\
+    c.mv  a0, s0 \n\
+    li a7, 93    \n\
+    ecall        \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(7U, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_slli(void) {
+    build_and_run(
+        "\
+.globl _start    \n\
+_start:          \n\
+    c.li   a0, 1 \n\
+    c.slli a0, 4 \n\
+    li a7, 93    \n\
+    ecall        \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(16U, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_c_jalr(void) {
+    build_and_run(
+        "\
+fn:             \n\
+    li a0, 1234 \n\
+    c.jr ra     \n\
+.globl _start   \n\
+_start:         \n\
+    la a1, fn   \n\
+    c.jalr a1   \n\
+    li a7, 93   \n\
+    ecall       \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(1234, g_regs[REG_A0]);
+}
+
+void test_rvc_runtime_lwsp_swsp(void) {
+    build_and_run(
+        "\
+.globl _start          \n\
+_start:                \n\
+    c.li a0, 1         \n\
+    c.jal fun          \n\
+    li a7, 93          \n\
+    ecall              \n\
+fun:                   \n\
+    c.addi16sp sp, -16 \n\
+    c.swsp a0, 0       \n\
+    li a0, 123456      \n\
+    c.lwsp a0, 0       \n\
+    c.addi16sp sp, 16  \n\
+    c.jr ra            \n\
+");
+    TEST_ASSERT_EQUAL(g_runtime_error_type, ERROR_NONE);
+    TEST_ASSERT_EQUAL_UINT32(1, g_regs[REG_A0]);
+}

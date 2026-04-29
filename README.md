@@ -10,11 +10,10 @@ This initial release introduces the following core features:
 ### Web UI version:
 - **modern editing experience**:
   - whole-UI light and dark themes
-  - CodeMirror 6-based editor with RV32IM and RV32C syntax highlighting
+  - CodeMirror 6-based editor with RV32IMC syntax highlighting
   - live assembler error reporting
 - **debugging tools**:
   - register and memory visualization with animation to highlight writes
-  - disassembly view for regular and supported compressed instructions
   - breakpoint management
   - step/next/continue debugging
   - reverse debugging (step back)
@@ -32,26 +31,6 @@ This initial release introduces the following core features:
 - minimal, cross-platform C
 - ELF binary and object file generation
 - headless execution of the emulator
-
-### Supported compressed instructions
-ARES currently implements a subset of RV32C in the assembler, emulator, disassembler, and Web UI grammar:
-
-```
-c.lwsp c.swsp
-c.lw c.sw
-c.j c.jal
-c.jr c.jalr
-c.beqz c.bnez
-c.li c.lui
-c.addi c.addi16sp c.addi4spn
-c.slli
-c.srli c.srai
-c.andi
-c.mv c.add
-c.and c.or c.xor c.sub
-c.nop
-c.ebreak
-```
 
 # Installation
 ## Command-line utilities
