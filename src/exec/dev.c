@@ -40,7 +40,8 @@ static Device g_mmio_devices[];
 static void ric_send_interrupt(u32 devaddr) {
     RICRegisters *ric = (void *)g_mmio_devices[6].buffer;
     ric->devaddr = devaddr;
-    emulator_interrupt_set_pending(CAUSE_SUPERVISOR_EXTERNAL & ~CAUSE_INTERRUPT);
+    emulator_interrupt_set_pending(CAUSE_SUPERVISOR_EXTERNAL &
+                                   ~CAUSE_INTERRUPT);
 }
 
 static bool dma_handler(u32 devaddr, u8 *buf, u32 op_size, u32 off, int op) {

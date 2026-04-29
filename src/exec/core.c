@@ -140,8 +140,8 @@ u16 C_LW(SmallReg rd_, SmallReg rs1_, u32 off) {
 
 u16 C_SW(SmallReg rs2_, SmallReg rs1_, u32 off) {
     return cfunct3(0b110) | cbits(off, 5, 3, 10) | cbits(rs1_, 2, 0, 7) |
-           cbits(off, 2, 2, 6) | cbits(off, 6, 6, 5) |
-           cbits(rs2_, 4, 0, 2) | 0b00;
+           cbits(off, 2, 2, 6) | cbits(off, 6, 6, 5) | cbits(rs2_, 4, 0, 2) |
+           0b00;
 }
 
 static u16 C_J_KIND(u32 funct3, u32 off) {
@@ -161,8 +161,8 @@ u16 C_JALR(Reg rs1) { return (0b1001 << 12) | (u16)((rs1 & 0x1f) << 7) | 0b10; }
 
 static u16 C_BRANCH_KIND(u32 funct3, SmallReg rs1_, u32 off) {
     return cfunct3(funct3) | cbits(off, 8, 8, 12) | cbits(off, 4, 3, 10) |
-           cbits(rs1_, 2, 0, 7) | cbits(off, 7, 6, 5) |
-           cbits(off, 2, 1, 3) | cbits(off, 5, 5, 2) | 0b01;
+           cbits(rs1_, 2, 0, 7) | cbits(off, 7, 6, 5) | cbits(off, 2, 1, 3) |
+           cbits(off, 5, 5, 2) | 0b01;
 }
 
 u16 C_BEQZ(SmallReg rs1_, u32 off) { return C_BRANCH_KIND(0b110, rs1_, off); }
@@ -215,8 +215,7 @@ u16 C_ANDI(SmallReg rd_, u32 imm) {
            cbits(rd_, 2, 0, 7) | cbits(imm, 4, 0, 2) | 0b01;
 }
 u16 C_MV(Reg rd, u32 rs2) {
-    return (0b1000 << 12) | cbits(rd, 4, 0, 7) | cbits(rs2, 4, 0, 2) |
-           0b10;
+    return (0b1000 << 12) | cbits(rd, 4, 0, 7) | cbits(rs2, 4, 0, 2) | 0b10;
 }
 
 u16 C_ADD(Reg rd, u32 rs2) {
@@ -1089,9 +1088,9 @@ const char *handle_branch(Parser *p, const char *opcode, size_t opcode_len) {
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    const char *err = pc_relative_target(
-        p, &orig, handle_branch, opcode, opcode_len, &addr, &later,
-        reloc_branch);
+    const char *err =
+        pc_relative_target(p, &orig, handle_branch, opcode, opcode_len, &addr,
+                           &later, reloc_branch);
     if (err) return err;
     if (later) {
         asm_emit(0, p->startline);
@@ -1130,9 +1129,9 @@ const char *handle_branch_zero(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    const char *err = pc_relative_target(
-        p, &orig, handle_branch_zero, opcode, opcode_len, &addr, &later,
-        reloc_branch);
+    const char *err =
+        pc_relative_target(p, &orig, handle_branch_zero, opcode, opcode_len,
+                           &addr, &later, reloc_branch);
     if (err) return err;
     if (later) {
         asm_emit(0, p->startline);
@@ -1538,8 +1537,8 @@ const char *handle_c_jump(Parser *p, const char *opcode, size_t opcode_len) {
     bool later;
 
     skip_trailing(p);
-    const char *err = pc_relative_target(
-        p, &orig, handle_c_jump, opcode, opcode_len, &addr, &later, reloc_c_j);
+    const char *err = pc_relative_target(p, &orig, handle_c_jump, opcode,
+                                         opcode_len, &addr, &later, reloc_c_j);
     if (err) return err;
     if (later) {
         asm_emit_16(0, p->startline);
@@ -1594,9 +1593,9 @@ const char *handle_c_branch_zero(Parser *p, const char *opcode,
     if (!consume_if(p, ',')) return "Expected ,";
 
     skip_trailing(p);
-    const char *err = pc_relative_target(
-        p, &orig, handle_c_branch_zero, opcode, opcode_len, &addr, &later,
-        reloc_branch);
+    const char *err =
+        pc_relative_target(p, &orig, handle_c_branch_zero, opcode, opcode_len,
+                           &addr, &later, reloc_branch);
     if (err) return err;
     if (later) {
         asm_emit_16(0, p->startline);
