@@ -916,6 +916,34 @@ const char *handle_alu_reg(Parser *p, const char *opcode, size_t opcode_len) {
     return NULL;
 }
 
+const char *handle_ext(Parser *p, const char *opcode, size_t opcode_len) {
+    int d, s1, s2;
+
+    skip_trailing(p);
+    if ((d = parse_reg(p)) == -1) return "Invalid rd";
+    skip_trailing(p);
+    if (!consume_if(p, ',')) return "Expected ,";
+
+    skip_trailing(p);
+    if ((s1 = parse_reg(p)) == -1) return "Invalid rs1";
+    skip_trailing(p);
+
+    if (str_eq_case(opcode, opcode_len, "zext.b")) {
+        asm_emit(ANDI(d, s1, 255), p->startline);
+    } else if (str_eq_case(opcode, opcode_len, "zext.h")) {
+        asm_emit(SLLI(d, s1, 16), p->startline);
+        asm_emit(SRLI(d, d, 16), p->startline);
+    } else if (str_eq_case(opcode, opcode_len, "sext.b")) {
+        asm_emit(SLLI(d, s1, 24), p->startline);
+        asm_emit(SRAI(d, d, 24), p->startline);
+    } else if (str_eq_case(opcode, opcode_len, "sext.h")) {
+        asm_emit(SLLI(d, s1, 16), p->startline);
+        asm_emit(SRAI(d, d, 16), p->startline);
+    }
+
+    return NULL;
+}
+
 const char *handle_alu_imm(Parser *p, const char *opcode, size_t opcode_len) {
     Parser orig = *p;
     int d, s1;
@@ -1289,7 +1317,7 @@ const char *handle_upper(Parser *p, const char *opcode, size_t opcode_len) {
     } else if (!parse_numeric(p, &simm)) return "Invalid immediate";
     // the immediate can either be signed or unsigned 20 bit
     if (simm < -524288 || simm > 1048575) return "Out of bounds immediate";
-    
+
     if (str_eq_case(opcode, opcode_len, "lui")) inst = LUI(d, simm);
     else if (str_eq_case(opcode, opcode_len, "auipc")) inst = AUIPC(d, simm);
 
@@ -1919,6 +1947,7 @@ OpcodeHandling opcode_types[] = {
     },
     {handle_alu_imm,
      {"addi", "slti", "sltiu", "andi", "ori", "xori", "slli", "srli", "srai"}},
+    {handle_ext, {"sext.b", "sext.h", "zext.b", "zext.h"}},
     {handle_ldst, {"lb", "lh", "lw", "lbu", "lhu", "sb", "sh", "sw"}},
     {handle_branch,
      {"beq", "bne", "blt", "bge", "bltu", "bgeu", "bgt", "ble", "bgtu",

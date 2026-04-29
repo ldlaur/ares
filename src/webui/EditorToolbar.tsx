@@ -1,9 +1,9 @@
 import { Component, Show } from "solid-js";
-import { prefixStr, testsuiteName } from "./App";
+import { prefixStr, setIntegratedHelp, testsuiteName } from "./App";
 import { doChangeTheme } from "./Theme";
 import { continueExecution, nextStep, quitDebug, reverseStep, run, runTestSuite, singleStep, startDebug, state } from "./EmulatorStore";
 
-// to rebuild font.woff2, download https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,200,0,0&icon_names=arrow_forward,dark_mode,folder_open,play_circle,resume,save,step_into,step_over,stop,undo
+// to rebuild font.woff2, download https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,200,0,0&icon_names=arrow_forward,close,dark_mode,folder_open,help,play_circle,resume,save,step_into,step_over,stop,undo
 
 export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: string) => void }> = (props) => {
     return (
@@ -16,6 +16,13 @@ export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: s
                 <div class="flex-grow"></div>
 
                 <div class="flex items-center gap-0.5">
+                    <ToolbarBtn
+                        class="theme-bg"
+                        icon="help"
+                        title="Show integrated help"
+                        onClick={() => setIntegratedHelp(true)}
+                    />
+
                     <ToolbarBtn
                         class="theme-bg"
                         icon="dark_mode"
@@ -145,7 +152,7 @@ function doOpen(setText: (s: string) => void) {
 const ToolbarBtn: Component<{ class: string, icon: string; title: string; onClick: () => void }> = (props) => (
     <button
         on:click={props.onClick}
-        class={props.class + " cursor-pointer flex items-center justify-center w-7 h-7 rounded material-symbols-outlined theme-bg-hover theme-bg-active"}
+        class={props.class + " cursor-pointer flex items-center justify-center w-7 h-7 material-symbols-outlined theme-bg-hover theme-bg-active"}
         style={{ "font-size": "26px" }}
         title={props.title}
     >

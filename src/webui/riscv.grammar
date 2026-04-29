@@ -96,6 +96,7 @@ RegisterExpression {
     (
       "add" | "slt" | "sltu" | "and" | "or" | "xor" | "sll" | "srl" | "sub" | "sra" | "mul" | "mulh" | "mulhsu" | "mulhu" | "div" |
               "divu" | "rem" | "remu" |
+      "zext.b" | "zext.h" | "sext.b" | "sext.h" |
       "addi" | "slt" | "sltiu" | "andi" | "ori" | "xori" | "slli" | "srli" | "srai" |
       "lb" | "lh" | "lw" | "lbu" | "lhu" | "sb" | "sh" | "sw" |
       "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu" | "bgt" | "ble" | "bgtu" | "bleu" |

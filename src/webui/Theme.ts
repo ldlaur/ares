@@ -32,10 +32,10 @@ function updateCss(colors: Colors): void {
 	background-color: ${colors.red};
 }
 .theme-bg-hover:hover {
-	filter: brightness(90%); 
+	background-color: ${colors.base1}; 
 }
 .theme-bg-active:active {
-	filter: brightness(80%); 
+	background-color: ${colors.base2}; 
 }
 .theme-gutter {
 	background-color: ${colors.base0};

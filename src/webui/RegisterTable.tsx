@@ -72,7 +72,7 @@ export const RegisterTable: Component<{ pc: number, regs: number[], regWritten: 
         <div class="flex flex-wrap items-center gap-1">
           <div class="pb-0.5 relative inline-block">
             <select
-              class="appearance-none font-semibold theme-fg theme-gutter px-2 pr-6 rounded theme-border focus:outline-none cursor-pointer"
+              class="appearance-none font-semibold theme-fg theme-gutter px-2 pr-6 theme-border focus:outline-none cursor-pointer"
               title="Memory unit size"
               value={unitSize()}
               onChange={(e) => handleUnitChange(Number(e.currentTarget.value) as UnitSize)}
@@ -86,7 +86,7 @@ export const RegisterTable: Component<{ pc: number, regs: number[], regWritten: 
           </div>
           <div class="pb-0.5 relative inline-block">
             <select
-              class="appearance-none font-semibold theme-fg theme-gutter px-2 pr-6 rounded theme-border focus:outline-none cursor-pointer"
+              class="appearance-none font-semibold theme-fg theme-gutter px-2 pr-6 theme-border focus:outline-none cursor-pointer"
               title="Number format"
               value={displayFormat()}
               onChange={(e) => handleFormatChange(e.currentTarget.value as DisplayFormat)}
