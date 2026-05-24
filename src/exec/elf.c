@@ -118,7 +118,7 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
 
     ElfProgramHeader *phdrs =
         (ElfProgramHeader *)(elf_contents + e_header->phdrs_off);
-    readable_phdrs = malloc(sizeof(ReadElfSegment) * e_header->phent_num);
+    readable_phdrs = calloc(e_header->phent_num, sizeof(ReadElfSegment));
     ARES_CHECK_OOM(readable_phdrs);
 
     for (u32 i = 0; i < e_header->phent_num; i++) {
@@ -697,7 +697,9 @@ bool elf_emit_exec(void **out, size_t *len, char **error) {
     *len = elf_off;
 
     free(core);
+    core = NULL;
     free(strtab);
+    strtab = NULL;
     return true;
 
 fail:
@@ -804,9 +806,13 @@ bool elf_emit_obj(void **out, size_t *len, char **error) {
     *len = elf_off;
 
     free(core);
+    core = NULL;
     free(strtab);
+    strtab = NULL;
     free(symtab);
+    symtab = NULL;
     free(relas);
+    relas = NULL;
     return true;
 
 fail:
@@ -875,8 +881,15 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
         s->contents.cap = s->contents.len = s_hdr->mem_sz;
         s->contents.buf = calloc(1, s->contents.len);
         ARES_CHECK_OOM(s->contents.buf);
-        if (s_hdr->type != SHT_NOBITS) 
+        if (s_hdr->type != SHT_NOBITS) {
+            if (s_hdr->off >= elf_len || s->contents.len > elf_len - s_hdr->off) {
+                *error = "section data offset or size exceeds buffer bounds";
+                free(s->contents.buf);
+                free(s);
+                goto fail;
+            }
             memcpy(s->contents.buf, elf_contents + s_hdr->off, s->contents.len);
+        }
         
         s->limit = s->base + s->contents.len;
 
