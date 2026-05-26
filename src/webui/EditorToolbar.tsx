@@ -1,10 +1,11 @@
-import { Component, Show } from "solid-js";
+import { Component, createSignal, Show } from "solid-js";
 import { prefixStr, setIntegratedHelp, testsuiteName } from "./App";
 import { currentTheme, doChangeTheme } from "./Theme";
 import { continueExecution, nextStep, quitDebug, reverseStep, run, runTestSuite, singleStep, startDebug, state } from "./EmulatorStore";
 import { githubLight } from "./GithubTheme";
+export const [ThemeIcon, setThemeIcon] = createSignal(getDefaultIcon())
 
-// to rebuild font.woff2, download https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,200,0,0&icon_names=arrow_forward,close,dark_mode,folder_open,help,play_circle,resume,save,step_into,step_over,stop,sunny,undo
+// to rebuild font.woff2, download https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,200,0,0&icon_names=arrow_forward,close,dark_mode,folder_open,help,night_sight_auto,play_circle,resume,save,step_into,step_over,stop,sunny,undo
 
 export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: string) => void }> = (props) => {
     return (
@@ -26,9 +27,9 @@ export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: s
 
                     <ToolbarBtn
                         class="theme-bg"
-                        icon={currentTheme() == githubLight ? "sunny" : "dark_mode"}
+                        icon={ThemeIcon()}
                         title="Change theme"
-                        onClick={doChangeTheme}
+                        onClick={() => doChangeTheme(ThemeIcon())}
                     />
 
                     <div class="w-px h-5 theme-separator mx-1"></div>
@@ -148,6 +149,14 @@ function openFile(): Promise<string> {
 
 function doOpen(setText: (s: string) => void) {
     openFile().then(setText)
+}
+
+function getDefaultIcon(): string {
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme && savedTheme == "System") {
+        return "night_sight_auto";
+    }
+    return currentTheme() == githubLight ? "sunny" : "dark_mode";
 }
 
 const ToolbarBtn: Component<{ class: string, icon: string; title: string; onClick: () => void }> = (props) => (

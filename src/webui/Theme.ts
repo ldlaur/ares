@@ -1,5 +1,6 @@
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { Colors, githubDark, githubLight } from "./GithubTheme";
+import { setThemeIcon, ThemeIcon } from "./EditorToolbar";
 
 export let [currentTheme, setCurrentTheme] = createSignal(getDefaultTheme());
 
@@ -150,13 +151,33 @@ function getDefaultTheme() {
 	else return githubLight;
 }
 
-export function doChangeTheme(): void {
-	if (currentTheme() == githubDark) {
+export function doChangeTheme(Icon: string): void {
+	if (Icon == "dark_mode") {
 		setCurrentTheme(githubLight);
+		setThemeIcon("sunny");
 		localStorage.setItem("theme", "GithubLight");
 	}
-	else if (currentTheme() == githubLight) {
+	else if (Icon == "sunny") {
+		localStorage.setItem("theme", "System");
+		setThemeIcon("night_sight_auto");
+		const darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
+		if (darkMode) {
+			setCurrentTheme(githubDark);
+		} else {
+			setCurrentTheme(githubLight);
+		}
+	} else {
 		setCurrentTheme(githubDark);
 		localStorage.setItem("theme", "GithubDark");
+		setThemeIcon("dark_mode");
 	}
 }
+
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+	const preference = event.matches ? "dark" : "light";
+	if (preference == "dark" && ThemeIcon() == "night_sight_auto") {
+		setCurrentTheme(githubDark);
+	} else if (ThemeIcon() == "night_sight_auto") {
+		setCurrentTheme(githubLight);
+	}
+});
