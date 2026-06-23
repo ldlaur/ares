@@ -217,39 +217,6 @@ static void assemble_from_file(const char *src_path, bool allow_externs) {
 
 // COMMANDS
 
-static void c_build(void) {
-    FILE *out = NULL;
-    assemble_from_file(g_next_arg, false);
-
-    if (g_error) goto exit;
-
-    void *elf_contents = NULL;
-    size_t elf_sz = 0;
-    char *error = NULL;
-
-    if (!elf_emit_exec(&elf_contents, &elf_sz, &error)) {
-        fprintf(stderr, "linker: %s\n", error);
-        goto exit;
-    }
-
-    out = fopen(g_exec_out, "wb");
-
-    if (!out) {
-        fprintf(stderr, "linker: could not open output file\n");
-        goto exit;
-    }
-
-    fwrite(elf_contents, elf_sz, 1, out);
-
-exit:
-    if (out) fclose(out);
-    if (g_txt) {
-        free(g_txt);
-        g_txt = NULL;
-    }
-    return;
-}
-
 static void c_run(void) {
     FILE *elf = fopen(g_next_arg, "rb");
     u8 *elf_contents = NULL;
@@ -504,11 +471,6 @@ static void opt_assemble(command_t *self) {
     g_command = c_assemble;
 }
 
-static void opt_build(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_build;
-}
-
 static void opt_run(command_t *self) {
     update_argument(self->arg);
     g_command = c_run;
@@ -560,10 +522,6 @@ int main(int argc, char **argv) {
                    "assemble an RV32 assembly file and output an ELF32 "
                    "relocatable object file",
                    opt_assemble);
-    command_option(&cmd, "-b", "--build <file>",
-                   "assemble an RV32 assembly file"
-                   " and output an ELF32 executable",
-                   opt_build);
     command_option(&cmd, "-r", "--run <file>", "run an ELF32 executable",
                    opt_run);
     command_option(&cmd, "-e", "--emulate <file>",
