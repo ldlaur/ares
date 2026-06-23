@@ -344,37 +344,6 @@ exit:
     if (elf_contents) free(elf_contents);
 }
 
-static void c_assemble(void) {
-    FILE *out = NULL;
-    void *elf_contents = NULL;
-    size_t elf_sz = 0;
-    char *error = NULL;
-    assemble_from_file(g_next_arg, true);
-    if (g_error) goto exit;
-
-    if (!elf_emit_obj(&elf_contents, &elf_sz, &error)) {
-        fprintf(stderr, "assembler: %s\n", error);
-        goto exit;
-    }
-
-    out = fopen(g_obj_out, "wb");
-
-    if (!out) {
-        fprintf(stderr, "assembelr: could not open output file\n");
-        return;
-    }
-
-    fwrite(elf_contents, elf_sz, 1, out);
-
-exit:
-    if (out) fclose(out);
-    if (elf_contents) free(elf_contents);
-    if (g_txt) {
-        free(g_txt);
-        g_txt = NULL;
-    }
-}
-
 static void c_hexdump(void) {
     FILE *file = fopen(g_next_arg, "rb");
 
@@ -466,11 +435,6 @@ static void c_ascii(void) {
 
 // OPTIONS
 
-static void opt_assemble(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_assemble;
-}
-
 static void opt_run(command_t *self) {
     update_argument(self->arg);
     g_command = c_run;
@@ -518,10 +482,6 @@ int main(int argc, char **argv) {
     // TODO: place real version number
     command_init(&cmd, argv[0], "0.0.1");
 
-    command_option(&cmd, "-a", "--assemble <file>",
-                   "assemble an RV32 assembly file and output an ELF32 "
-                   "relocatable object file",
-                   opt_assemble);
     command_option(&cmd, "-r", "--run <file>", "run an ELF32 executable",
                    opt_run);
     command_option(&cmd, "-e", "--emulate <file>",
