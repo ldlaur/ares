@@ -10,8 +10,6 @@
 #include "ares/elf.h"
 #include "ares/emulate.h"
 #include "ares/util.h"
-#include "ezld/include/ezld/linker.h"
-#include "ezld/include/ezld/runtime.h"
 #include "vendor/commander.h"
 
 // Type of command handler functions (c_*)
@@ -410,31 +408,6 @@ exit:
     }
 }
 
-static void c_link(void) {
-    const char *fake_argv[] = {"linker", NULL};
-    ezld_runtime_init(1, fake_argv);
-    ezld_config_t cfg = {0};
-
-    cfg.cfg_entrysym = "_start";
-    cfg.cfg_outpath = g_exec_out;
-    cfg.cfg_segalign = 0x1000;
-    ezld_array_init(cfg.cfg_objpaths);
-    ezld_array_init(cfg.cfg_sections);
-    *ezld_array_push(cfg.cfg_sections) =
-        (ezld_sec_cfg_t){.sc_name = ".text", .sc_vaddr = TEXT_BASE};
-    *ezld_array_push(cfg.cfg_sections) =
-        (ezld_sec_cfg_t){.sc_name = ".data", .sc_vaddr = DATA_BASE};
-
-    for (int i = 0; i < g_cmd_args_len; i++) {
-        const char *filpath = g_cmd_args[i];
-        *ezld_array_push(cfg.cfg_objpaths) = filpath;
-    }
-
-    ezld_link(cfg);
-    ezld_array_free(cfg.cfg_objpaths);
-    ezld_array_free(cfg.cfg_sections);
-}
-
 static void c_hexdump(void) {
     FILE *file = fopen(g_next_arg, "rb");
 
@@ -564,11 +537,6 @@ static void opt_hexdump(command_t *self) {
     g_command = c_hexdump;
 }
 
-static void opt_link(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_link;
-}
-
 static void opt_ascii(command_t *self) {
     update_argument(self->arg);
     g_command = c_ascii;
@@ -606,8 +574,6 @@ int main(int argc, char **argv) {
                    opt_hexdump);
     command_option(&cmd, "-c", "--ascii <file>", "perform ascii dump of file",
                    opt_ascii);
-    command_option(&cmd, "-l", "--link", "link object files using ezld linker",
-                   opt_link);
     command_option(&cmd, "-o", "--output <file>", "choose output file name",
                    opt_o);
     command_option(&cmd, "-s", "--sanitize", "enable ares sanitizers (callsan)",
