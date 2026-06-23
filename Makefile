@@ -25,8 +25,8 @@ $(BIN_DIR)/ares: $(SRC) | $(BIN_DIR)
 $(BIN_DIR)/ares_afl: $(AFLSRC) | $(BIN_DIR)
 	$(AFL_CC) $(CFLAGS) $(AFL_FLAGS) $(AFLSRC) -o $@
 
-$(BIN_DIR)/ares_libfuzzer: $(FUZZER_SRC) $(LIBEZLD) | $(BIN_DIR)
-	$(LIBFUZZER_CC) $(CFLAGS) $(LIBFUZZER_FLAGS) $(LIBEZLD) $(FUZZER_SRC) -o $@
+$(BIN_DIR)/ares_libfuzzer: $(FUZZER_SRC) | $(BIN_DIR)
+	$(LIBFUZZER_CC) $(CFLAGS) $(LIBFUZZER_FLAGS)  $(FUZZER_SRC) -o $@
 
 src/test/test_main.c: $(TEST_SRC)
 	./src/test/gen_main.sh src/test/test.c > src/test/test_main.c
