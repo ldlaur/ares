@@ -10,55 +10,10 @@
 #include "ares/elf.h"
 #include "ares/emulate.h"
 #include "ares/util.h"
-#include "vendor/commander.h"
-
-// Type of command handler functions (c_*)
-typedef void (*cmd_func_t)(void);
-
-// Default output paths, changed by opt_o
-static char *g_obj_out = "a.o";
-static char *g_exec_out = "a.out";
-static bool g_out_changed = false;
-
-// Copies of argc, argv from main
-static char **g_argv;
-static int g_argc;
-
-// The next argument in the command, set by opt_*
-// for commands c_*
-static char *g_next_arg = NULL;
-static cmd_func_t g_command = NULL;
-
-// These are non-command arguments
-// Set in main
-static const char **g_cmd_args;
-static int g_cmd_args_len;
-
-// Flags
-// Set by variout opt_* like --sanitize, --fuzz
-static bool g_flg_callsan = false;
-
-// The file text, used as backing storage by all global strings
-// this simplifies lifetime management significantly
-static char *g_txt;
-
-// SETUP FUNCTIONS
-
-static void update_argument(const char *arg) {
-    if (g_command) {
-        fprintf(stderr, "only one command is allowed\n");
-        exit(-1);
-    }
-
-    if (arg) {
-        g_next_arg = strdup(arg);
-        ARES_CHECK_OOM(g_next_arg);
-    }
-}
 
 // UTILITY FUNCTIONS
 
-static void emulate_safe(void) {
+static void emulate_safe(bool use_callsan) {
     while (!g_exited) {
         emulate();
 
@@ -152,9 +107,7 @@ static void emulate_safe(void) {
     return;
 
 err:
-    if (!g_flg_callsan) {
-        return;
-    }
+    if (!use_callsan) return;
 
     puts("");
     puts("===================== ARES SANITIZER ERROR");
@@ -182,43 +135,43 @@ err:
     for (size_t i = 0; i < 32; i += 4) {
         for (size_t j = 0; j < 4; j++) {
             fprintf(stderr, "x%zu: ", i + j);
-            if (i + j < 10) {
-                fprintf(stderr, " ");
-            }
+            if (i + j < 10) fprintf(stderr, " ");
             fprintf(stderr, "0x%08x    ", g_regs[i + j]);
         }
         puts("");
     }
 }
 
-static void assemble_from_file(const char *src_path, bool allow_externs) {
+static char *assemble_from_file(const char *src_path, bool allow_externs) {
     FILE *f = fopen(src_path, "r");
 
     if (!f) {
         g_error = "assembler: could not open input file";
         fprintf(stderr, "%s\n", g_error);
-        return;
+        return NULL;
     }
 
     fseek(f, 0, SEEK_END);
     size_t s = ftell(f);
     rewind(f);
-    g_txt = malloc(s);
-    ARES_CHECK_OOM(g_txt);
-    fread(g_txt, s, 1, f);
+    char *text = malloc(s);
+    ARES_CHECK_OOM(text);
+    fread(text, s, 1, f);
     fclose(f);
 
-    assemble(g_txt, s, allow_externs);
+    assemble(text, s, allow_externs);
 
     if (g_error) {
         fprintf(stderr, "assembler: line %u %s\n", g_error_line, g_error);
     }
+
+    return text;
 }
 
 // COMMANDS
 
-static void c_run(void) {
-    FILE *elf = fopen(g_next_arg, "rb");
+static void run_elf(const char *elf_path, bool use_callsan) {
+    FILE *elf = fopen(elf_path, "rb");
     u8 *elf_contents = NULL;
     char *error = NULL;
 
@@ -238,7 +191,7 @@ static void c_run(void) {
 
     ARES_CHECK_CALL(elf_load(elf_contents, sz, &error), exit);
 
-    emulate_safe();
+    emulate_safe(use_callsan);
 
 exit:
     if (error) fprintf(stderr, "loader: %s\n", error);
@@ -246,21 +199,14 @@ exit:
     if (elf_contents) free(elf_contents);
 }
 
-static void c_emulate(void) {
-    assemble_from_file(g_next_arg, false);
-    if (g_error) goto exit;
-
-    emulate_safe();
-
-exit:
-    if (g_txt) {
-        free(g_txt);
-        g_txt = NULL;
-    }
+static void emulate_from_source(const char *src_path, bool use_callsan) {
+    char *text = assemble_from_file(src_path, false);
+    if (!g_error) emulate_safe(use_callsan);
+    free(text);
 }
 
-static void c_readelf(void) {
-    FILE *elf = fopen(g_next_arg, "rb");
+static void readelf(const char *elf_path) {
+    FILE *elf = fopen(elf_path, "rb");
     char *error = NULL;
     u8 *elf_contents = NULL;
 
@@ -341,11 +287,11 @@ static void c_readelf(void) {
 exit:
     if (error) fprintf(stderr, "readelf: %s\n", error);
     if (elf) fclose(elf);
-    if (elf_contents) free(elf_contents);
+    free(elf_contents);
 }
 
-static void c_hexdump(void) {
-    FILE *file = fopen(g_next_arg, "rb");
+static void hexdump(const char *file_path) {
+    FILE *file = fopen(file_path, "rb");
 
     if (!file) {
         fprintf(stderr, "hexdump: could not open file\n");
@@ -371,8 +317,8 @@ static void c_hexdump(void) {
     fclose(file);
 }
 
-static void c_ascii(void) {
-    FILE *file = fopen(g_next_arg, "rb");
+static void asciidump(const char *file_path) {
+    FILE *file = fopen(file_path, "rb");
 
     if (!file) {
         fprintf(stderr, "ascii: could not open file\n");
@@ -433,84 +379,66 @@ static void c_ascii(void) {
     fclose(file);
 }
 
-// OPTIONS
-
-static void opt_run(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_run;
-}
-
-static void opt_emulate(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_emulate;
-}
-
-static void opt_readelf(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_readelf;
-}
-
-static void opt_o(command_t *self) {
-    g_obj_out = malloc(strlen(self->arg) + 1);
-    ARES_CHECK_OOM(g_obj_out);
-    strcpy(g_obj_out, self->arg);
-    g_exec_out = g_obj_out;
-    g_out_changed = true;
-}
-
-static void opt_hexdump(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_hexdump;
-}
-
-static void opt_ascii(command_t *self) {
-    update_argument(self->arg);
-    g_command = c_ascii;
-}
-
-static void opt_sanitize(command_t *self) {
-    g_flg_callsan = true;
-    callsan_init();
-}
-
-int main(int argc, char **argv) {
-    atexit(free_runtime);
-    g_argc = argc;
-    g_argv = argv;
-
-    command_t cmd;
-    // TODO: place real version number
-    command_init(&cmd, argv[0], "0.0.1");
-
-    command_option(&cmd, "-r", "--run <file>", "run an ELF32 executable",
-                   opt_run);
-    command_option(&cmd, "-e", "--emulate <file>",
-                   "assemble and run an RV32 assembly file", opt_emulate);
-    command_option(&cmd, "-i", "--readelf <file>",
-                   "show information about ELF file", opt_readelf);
-    command_option(&cmd, "-x", "--hexdump <file>", "perform hexdump of file",
-                   opt_hexdump);
-    command_option(&cmd, "-c", "--ascii <file>", "perform ascii dump of file",
-                   opt_ascii);
-    command_option(&cmd, "-o", "--output <file>", "choose output file name",
-                   opt_o);
-    command_option(&cmd, "-s", "--sanitize", "enable ares sanitizers (callsan)",
-                   opt_sanitize);
-    command_parse(&cmd, argc, argv);
-    g_cmd_args = (const char **)cmd.argv;
-    g_cmd_args_len = cmd.argc;
-
-    if (1 == argc || !g_command) {
-        command_help(&cmd);
-        command_free(&cmd);
+int main(int argc, const char *const *const argv) {
+    if (argc < 2) {
+        fprintf(stderr, "ares: invalid commandline, try 'help'\n");
         return EXIT_FAILURE;
     }
 
-    g_command();
-    free((void *)g_next_arg);
-    if (g_out_changed) {
-        free((void *)g_obj_out);
+    atexit(free_runtime);
+    const char *const command = argv[1];
+
+    if (strcmp(command, "help") == 0) {
+        printf("Usage: %s <command> [--callsan] <file>\n\n", argv[0]);
+        printf("Commands:\n");
+        printf("  assemble   <file>   Assemble a source file\n");
+        printf(
+            "  emulate    <file>   Emulate from source (supports --callsan)\n");
+        printf("  runelf     <file>   Run an ELF file (supports --callsan)\n");
+        printf("  readelf    <file>   Parse and display ELF structure\n");
+        printf("  hexdump    <file>   Print a hex dump of a file\n");
+        printf("  asciidump  <file>   Print an ASCII dump of a file\n");
+        printf("  help                Show this help message\n");
+        return EXIT_SUCCESS;
     }
-    command_free(&cmd);
+
+    bool use_callsan = false;
+    const char *file_path = NULL;
+
+    // Parse arguments regardless of order
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--callsan") == 0) use_callsan = true;
+        else if (!file_path) file_path = argv[i];
+        else {
+            fprintf(stderr, "ares: unexpected argument '%s'\n", argv[i]);
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (!file_path) {
+        fprintf(stderr, "ares: missing file path for command '%s'\n", command);
+        return EXIT_FAILURE;
+    }
+
+    // Route to appropriate function
+    if (strcmp(command, "assemble") == 0) {
+        char *text = assemble_from_file(file_path, false);
+        // TODO: emit object
+        free(text);
+    } else if (strcmp(command, "emulate") == 0) {
+        emulate_from_source(file_path, use_callsan);
+    } else if (strcmp(command, "runelf") == 0) {
+        run_elf(file_path, use_callsan);
+    } else if (strcmp(command, "readelf") == 0) {
+        readelf(file_path);
+    } else if (strcmp(command, "hexdump") == 0) {
+        hexdump(file_path);
+    } else if (strcmp(command, "asciidump") == 0) {
+        asciidump(file_path);
+    } else {
+        fprintf(stderr, "ares: unknown command '%s'\n", command);
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
