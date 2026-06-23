@@ -50,8 +50,8 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
     ReadElfSection *readable_shdrs = NULL;
     ElfHeader *e_header = (ElfHeader *)elf_contents;
 
-    if (0x7F != e_header->magic[0] || 'E' != e_header->magic[1] ||
-        'L' != e_header->magic[2] || 'F' != e_header->magic[3]) {
+    if (e_header->magic[0] != 0x7F || e_header->magic[1] != 'E' ||
+        e_header->magic[2] != 'L' || e_header->magic[3] != 'F') {
         *error = "not an elf file";
         return false;
     }
@@ -60,9 +60,9 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
     out->magic8 = elf_contents;
 
     // Print file class
-    if (1 == e_header->bits) {
+    if (e_header->bits == 1) {
         out->class = "ELF32";
-    } else if (2 == e_header->bits) {
+    } else if (e_header->bits == 2) {
         out->class =
             "ELF64 (WARNING: Corrupt content ahead, format not supported)";
     } else {
@@ -70,40 +70,40 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
     }
 
     // Print file endianness
-    if (1 == e_header->endianness) {
+    if (e_header->endianness == 1) {
         out->endianness = "Little endian";
-    } else if (2 == e_header->endianness) {
+    } else if (e_header->endianness == 2) {
         out->endianness = "Big endian";
     } else {
         out->endianness = UNKNOWN_PROP;
     }
 
     // Print OS/ABI
-    if (0 == e_header->abi) {
+    if (e_header->abi == 0) {
         out->abi = "UNIX - System V";
     } else {
         out->abi = UNKNOWN_PROP;
     }
 
     // Print ELF type
-    if (1 == e_header->type) {
+    if (e_header->type == 1) {
         out->type = "Relocatable";
-    } else if (2 == e_header->type) {
+    } else if (e_header->type == 2) {
         out->type = "Executable";
-    } else if (3 == e_header->type) {
+    } else if (e_header->type == 3) {
         out->type = "Shared";
-    } else if (4 == e_header->type) {
+    } else if (e_header->type == 4) {
         out->type = "Core";
     } else {
         out->type = UNKNOWN_PROP;
     }
 
     // Print architecture
-    if (0xF3 == e_header->isa) {
+    if (e_header->isa == 0xF3) {
         out->architecture = "RISC-V";
-    } else if (0x3E == e_header->isa) {
+    } else if (e_header->isa == 0x3E) {
         out->architecture = "x86-64 (x64, AMD/Intel 64 bit)";
-    } else if (0xB7 == e_header->isa) {
+    } else if (e_header->isa == 0xB7) {
         out->architecture = "AArch64 (ARM64)";
     } else {
         out->architecture = UNKNOWN_PROP;
@@ -128,15 +128,15 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
 
         readable->phdr = phdr;
 
-        if (0b100 & phdr->flags) {
+        if (phdr->flags & 0b100) {
             readable->flags[flags_idx++] = 'R';
         }
 
-        if (0b010 & phdr->flags) {
+        if (phdr->flags & 0b010) {
             readable->flags[flags_idx++] = 'W';
         }
 
-        if (0b001 & phdr->flags) {
+        if (phdr->flags & 0b001) {
             readable->flags[flags_idx++] = 'X';
         }
 
@@ -197,19 +197,19 @@ bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
 
         readable->shdr = shdr;
 
-        if (SHF_WRITE & shdr->flags) {
+        if (shdr->flags & SHF_WRITE) {
             readable->flags[flags_idx++] = 'W';
         }
 
-        if (SHF_ALLOC & shdr->flags) {
+        if (shdr->flags & SHF_ALLOC) {
             readable->flags[flags_idx++] = 'A';
         }
 
-        if (SHF_STRINGS & shdr->flags) {
+        if (shdr->flags & SHF_STRINGS) {
             readable->flags[flags_idx++] = 'S';
         }
 
-        if (SHF_EXECINSTR & shdr->flags) {
+        if (shdr->flags & SHF_EXECINSTR) {
             readable->flags[flags_idx++] = 'X';
         }
 
@@ -277,11 +277,11 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
     size_t reloc_shdrs_num = 0;
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
         Section *s = *ARES_ARRAY_GET(&g_sections, i);
-        if (s->physical && 0 != s->contents.len) {
+        if (s->physical && s->contents.len != 0) {
             segments_count++;
             segments_sz += s->contents.len;
 
-            if (0 != s->relocations.len) {
+            if (s->relocations.len != 0) {
                 reloc_shdrs_num++;
             }
         }
@@ -327,10 +327,10 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
     size_t reloc_i = 1 + rsv_shdrs + segments_count;
 
     // Return already known values
-    if (NULL != reloc_idx) {
+    if (reloc_idx != NULL) {
         *reloc_idx = reloc_i;
     }
-    if (NULL != reloc_num) {
+    if (reloc_num != NULL) {
         *reloc_num = reloc_shdrs_num;
     }
     *out = region;
@@ -347,7 +347,7 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
     // RELOCATION HEADERS EXCLUDED
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
         Section *s = *ARES_ARRAY_GET(&g_sections, i);
-        if (!s->physical || 0 == s->contents.len) {
+        if (!s->physical || s->contents.len == 0) {
             continue;
         }
 
@@ -402,7 +402,7 @@ static bool make_core(u8 **out, size_t *out_sz, size_t *name_off,
         }
 
         // Write relocation section header
-        if (use_shdrs && 0 != s->relocations.len) {
+        if (use_shdrs && s->relocations.len != 0) {
             ElfSectionHeader reloc_shdr = {.name_off = *name_off,
                                            .type = SHT_RELA,
                                            .flags = SHF_INFO_LINK,
@@ -439,10 +439,10 @@ static bool make_strtab(char **out, size_t *out_sz, bool inc_externs,
     size_t strtab_sz = 1 + base_len;
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
         Section *s = *ARES_ARRAY_GET(&g_sections, i);
-        if (s->physical && 0 != s->contents.len) {
+        if (s->physical && s->contents.len != 0) {
             strtab_sz += strlen(s->name) + 1;
 
-            if (0 != s->relocations.len) {
+            if (s->relocations.len != 0) {
                 strtab_sz += strlen(".rela") + strlen(s->name) + 1;
             }
         }
@@ -470,10 +470,10 @@ static bool make_strtab(char **out, size_t *out_sz, bool inc_externs,
     copy_s(strtab, ".symtab", &strtab_off);
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
         Section *s = *ARES_ARRAY_GET(&g_sections, i);
-        if (s->physical && 0 != s->contents.len) {
+        if (s->physical && s->contents.len != 0) {
             copy_s(strtab, s->name, &strtab_off);
 
-            if (0 != s->relocations.len) {
+            if (s->relocations.len != 0) {
                 copy_s(strtab, ".rela", &strtab_off);
                 strtab_off--;
                 copy_s(strtab, s->name, &strtab_off);
@@ -598,7 +598,7 @@ static bool make_rela(u8 **out, size_t *out_sz, size_t file_off,
     size_t rel_i = 0;
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
         Section *s = *ARES_ARRAY_GET(&g_sections, i);
-        if (!s->physical || 0 == s->contents.len || 0 == s->relocations.len)
+        if (!s->physical || s->contents.len == 0 || s->relocations.len == 0)
             continue;
 
         ElfSectionHeader *rela_shdr = &shdrs[reloc_idx];
@@ -831,23 +831,23 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
 
     ElfHeader *e_header = (ElfHeader *)elf_contents;
 
-    if (0x7F != e_header->magic[0] || 'E' != e_header->magic[1] ||
-        'L' != e_header->magic[2] || 'F' != e_header->magic[3]) {
+    if (e_header->magic[0] != 0x7F || e_header->magic[1] != 'E' ||
+        e_header->magic[2] != 'L' || e_header->magic[3] != 'F') {
         *error = "not an elf file";
         return false;
     }
 
-    if (1 != e_header->bits) {
+    if (e_header->bits != 1) {
         *error = "unsupported elf variant (only elf32 is supported)";
         return false;
     }
 
-    if (0xF3 != e_header->isa) {
+    if (e_header->isa != 0xF3) {
         *error = "unsupported architecture (only risc-v is supported)";
         return false;
     }
 
-    if (2 != e_header->type) {
+    if (e_header->type != 2) {
         *error = "not an elf executable";
         return false;
     }
@@ -863,7 +863,7 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
 
     for (u32 i = 0; i < e_header->shent_num; i++) {
         ElfSectionHeader *s_hdr = &shdrs[i];
-        if (!(SHF_ALLOC & s_hdr->flags)) {
+        if (!(s_hdr->flags & SHF_ALLOC)) {
             continue;
         }
 
@@ -875,9 +875,9 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
         s->contents.cap = s->contents.len = s_hdr->mem_sz;
         s->contents.buf = calloc(1, s->contents.len);
         ARES_CHECK_OOM(s->contents.buf);
-        if (s_hdr->type != SHT_NOBITS) 
+        if (s_hdr->type != SHT_NOBITS)
             memcpy(s->contents.buf, elf_contents + s_hdr->off, s->contents.len);
-        
+
         s->limit = s->base + s->contents.len;
 
         if (s_hdr->name_off >= str_tab_len) {
@@ -888,11 +888,11 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
 
         s->name = str_tab + s_hdr->name_off;
 
-        if (SHF_WRITE & s_hdr->flags) {
+        if (s_hdr->flags & SHF_WRITE) {
             s->write = true;
         }
 
-        if (SHF_EXECINSTR & s_hdr->flags) {
+        if (s_hdr->flags & SHF_EXECINSTR) {
             s->execute = true;
         }
 
