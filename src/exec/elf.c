@@ -49,6 +49,12 @@ static Elf32_Ehdr *ehdr_check(u8 *elf_contents, size_t elf_len,
         return NULL;
     }
 
+    if (ehdr->e_ident[EI_VERSION] != EV_CURRENT ||
+        ehdr->e_version != EV_CURRENT) {
+        *out_error = "incompatible elf version";
+        return NULL;
+    }
+
     if (ehdr->e_ident[EI_CLASS] != ELFCLASS32) {
         *out_error = "not a 32 bit elf";
         return NULL;
@@ -125,31 +131,9 @@ static bool shdrs_check(Elf32_Ehdr *ehdr, size_t elf_len, char **out_error) {
     u8 *elf_contents = (void *)ehdr;
     Elf32_Shdr *shdrs = (void *)(elf_contents + ehdr->e_shoff);
     Elf32_Shdr *str_sh = NULL;
-    char *strtab = NULL;
 
     if (ehdr->e_shstrndx == SHN_UNDEF) goto check;
     str_sh = shdrs + ehdr->e_shstrndx;
-    if (str_sh->sh_offset > elf_len ||
-        sum_overflows(str_sh->sh_offset, str_sh->sh_size) ||
-        str_sh->sh_offset + str_sh->sh_size > elf_len) {
-        *out_error = "malformed section header string table";
-        return false;
-    }
-
-    strtab = (void *)(elf_contents + str_sh->sh_offset);
-    // We force the last byte to be \0 even if this is not standard. This way
-    // C-string operations are safe, and worst case we're missing the last char
-    // of a single string. This could cause issues in other contexts, but ARES
-    // doesn't do symbol lookup anyway. Without this, there's no real guarantee
-    // that ANY string in this buffer is terminated, so it would ALWAYS be
-    // unsafe to touch without explicit bounds.
-    // NOTE: this is altering state, but 1) the caller signed-in to this because
-    // elf_read's contract is u8 *, not const u8 *; 2) the use case is bounded
-    // to where this is safe.
-    // NOTE: unfortunately copying is not really an alternative here!
-    // NOTE: null terminating the whole string table **guarantees termination of
-    // all substrings** as noted above
-    if (str_sh->sh_size > 0) strtab[str_sh->sh_size - 1] = 0;
 
 check:
     if (ehdr->e_shnum == 0) return true;
@@ -170,7 +154,10 @@ check:
                                SHF_MERGE | SHF_STRINGS | SHF_INFO_LINK |
                                SHF_OS_NONCONFORMING | SHF_TLS) ||
             (shdr->sh_addralign > 1 && !is_pow2(shdr->sh_addralign)) ||
-            (shdr->sh_entsize != 0 && shdr->sh_size % shdr->sh_entsize != 0)) {
+            (shdr->sh_entsize != 0 && shdr->sh_size % shdr->sh_entsize != 0) ||
+            (shdr->sh_type == SHT_STRTAB &&
+             (shdr->sh_size == 0 ||
+              elf_contents[shdr->sh_offset + shdr->sh_size - 1] != 0))) {
             *out_error = "one or more malformed section headers";
             return false;
         }
@@ -180,8 +167,8 @@ check:
 }
 
 // pre: ehdr is inside a larger buffer containing the entire ELF
-static bool ehdr_check_entires(Elf32_Ehdr *ehdr, size_t elf_len,
-                               char **out_error) {
+static bool ehdr_checkentries(Elf32_Ehdr *ehdr, size_t elf_len,
+                              char **out_error) {
     return ehdr_check_offsets(ehdr, elf_len, out_error) &&
            phdrs_check(ehdr, elf_len, out_error) &&
            shdrs_check(ehdr, elf_len, out_error);
@@ -191,7 +178,7 @@ static Elf32_Ehdr *elf_check_full(u8 *elf_contents, size_t elf_len,
                                   char **out_error) {
     Elf32_Ehdr *ehdr = ehdr_check(elf_contents, elf_len, out_error);
     if (!ehdr) return NULL;
-    if (!ehdr_check_entires(ehdr, elf_len, out_error)) return NULL;
+    if (!ehdr_checkentries(ehdr, elf_len, out_error)) return NULL;
 
     if (ehdr->e_ident[EI_DATA] != ELFDATA2LSB) {
         *out_error = "not a little endian elf";
@@ -326,9 +313,10 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
     ARES_CHECK_OOM(readable_shdrs);
 
     // Guaranteed to be safe by shdrs_check
-    Elf32_Shdr *str_sh = shdrs + ehdr->e_shstrndx;
+    Elf32_Shdr *str_sh = NULL;
     char *strtab = NULL;
     if (ehdr->e_shstrndx != SHN_UNDEF) {
+        str_sh = shdrs + ehdr->e_shstrndx;
         strtab = (void *)(elf_contents + str_sh->sh_offset);
     }
 
@@ -377,98 +365,63 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
 }
 
 bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
-    return false;
-    /*
-        if (!elf_contents) {
-            *error = "null buffer";
-            return false;
-        }
+    Elf32_Ehdr *ehdr = elf_check_full(elf_contents, elf_len, error);
+    if (!ehdr) return false;
 
-        if (elf_len < sizeof(ElfHeader)) {
-            *error = "corrupt or invalid elf header";
-            return false;
-        }
-
-        ElfHeader *e_header = (ElfHeader *)elf_contents;
-
-        if (e_header->magic[0] != 0x7F || e_header->magic[1] != 'E' ||
-            e_header->magic[2] != 'L' || e_header->magic[3] != 'F') {
-            *error = "not an elf file";
-            return false;
-        }
-
-        if (e_header->bits != 1) {
-            *error = "unsupported elf variant (only elf32 is supported)";
-            return false;
-        }
-
-        if (e_header->isa != 0xF3) {
-            *error = "unsupported architecture (only risc-v is supported)";
-            return false;
-        }
-
-        if (e_header->type != 2) {
-            *error = "not an elf executable";
-            return false;
-        }
-
-        // ElfProgramHeader *phdrs =
-        //     (ElfProgramHeader *)(elf_contents + e_header->phdrs_off);
-        ElfSectionHeader *shdrs =
-            (ElfSectionHeader *)(elf_contents + e_header->shdrs_off);
-
-        ElfSectionHeader *str_tab_shdr = &shdrs[e_header->shdr_str_idx];
-        char *str_tab = (char *)(elf_contents + str_tab_shdr->off);
-        u32 str_tab_len = str_tab_shdr->mem_sz;
-
-        for (u32 i = 0; i < e_header->shent_num; i++) {
-            ElfSectionHeader *s_hdr = &shdrs[i];
-            if (!(s_hdr->flags & SHF_ALLOC)) {
-                continue;
-            }
-
-            Section *s = calloc(1, sizeof(Section));
-            ARES_CHECK_OOM(s);
-            s->read = true;
-            s->align = s_hdr->align;
-            s->base = s_hdr->virt_addr;
-            s->contents.cap = s->contents.len = s_hdr->mem_sz;
-            s->contents.buf = calloc(1, s->contents.len);
-            ARES_CHECK_OOM(s->contents.buf);
-            if (s_hdr->type != SHT_NOBITS)
-                memcpy(s->contents.buf, elf_contents + s_hdr->off,
-    s->contents.len);
-
-            s->limit = s->base + s->contents.len;
-
-            if (s_hdr->name_off >= str_tab_len) {
-                *error = "section header name offset out of range";
-                free(s);
-                goto fail;
-            }
-
-            s->name = str_tab + s_hdr->name_off;
-
-            if (s_hdr->flags & SHF_WRITE) {
-                s->write = true;
-            }
-
-            if (s_hdr->flags & SHF_EXECINSTR) {
-                s->execute = true;
-            }
-
-            *ARES_ARRAY_PUSH(&g_sections) = s;
-        }
-
-        emulator_init();
-        g_pc = e_header->entry;
-        return true;
-
-    fail:
-        for (size_t i = 0; i < ARES_ARRAY_LEN(&g_sections); i++) {
-            free(*ARES_ARRAY_GET(&g_sections, i));
-        }
-        ARES_ARRAY_FREE(&g_sections);
+    if (ehdr->e_type != ET_EXEC) {
+        *error = "not an elf executable";
         return false;
-        */
+    }
+
+    // Load program headers
+    Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
+    for (u32 i = 0; i < ehdr->e_phnum; i++) {
+        Elf32_Phdr *phdr = phdrs + i;
+        if (phdr->p_type != PT_LOAD) continue;
+
+        Section *s = calloc(1, sizeof(*s));
+        ARES_CHECK_OOM(s);
+        s->read = phdr->p_flags & PF_R;
+        s->write = phdr->p_flags & PF_W;
+        s->execute = phdr->p_flags & PF_X;
+        s->align = phdr->p_align;
+        s->base = phdr->p_vaddr;
+        s->name = UNKNOWN_PROP;
+
+        s->contents.cap = s->contents.len = phdr->p_memsz;
+        s->contents.buf = calloc(1, s->contents.len);
+        ARES_CHECK_OOM(s->contents.buf);
+        // NOTE: we know file size <= memory size (checked above)
+        memcpy(s->contents.buf, elf_contents + phdr->p_offset, phdr->p_filesz);
+        s->limit = s->base + s->contents.len;
+
+        *ARES_ARRAY_PUSH(&g_sections) = s;
+    }
+
+    // NOTE: no section header string table = no way to resolve names
+    if (ehdr->e_shstrndx == SHN_UNDEF) goto exit;
+
+    Elf32_Shdr *shdrs = (void *)(elf_contents + ehdr->e_shoff);
+    Elf32_Shdr *str_sh = shdrs + ehdr->e_shstrndx;
+    char *strtab = (void *)(elf_contents + str_sh->sh_offset);
+
+    // Use a simple heuristic to resolve section names (when possible)
+    for (u32 i = 1; i < ehdr->e_shnum; i++) {
+        Elf32_Shdr *shdr = shdrs + i;
+        if (!(shdr->sh_flags & SHF_ALLOC)) continue;
+
+        // Find ARES section with the same starting address as this ELF section
+        Section *s = NULL;
+        for (u32 j = 0; j < ARES_ARRAY_LEN(&g_sections) && !s; j++) {
+            Section *c = *ARES_ARRAY_GET(&g_sections, j);
+            if (c->base == shdr->sh_addr) s = c;
+        }
+
+        if (s) s->name = strtab + shdr->sh_name;
+    }
+
+exit:
+    emulator_init();
+    g_pc = ehdr->e_entry;
+    return true;
 }

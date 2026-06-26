@@ -196,7 +196,7 @@ static void run_elf(const char *elf_path, bool use_callsan) {
 exit:
     if (error) fprintf(stderr, "loader: %s\n", error);
     if (elf) fclose(elf);
-    if (elf_contents) free(elf_contents);
+    free(elf_contents);
 }
 
 static void emulate_from_source(const char *src_path, bool use_callsan) {
