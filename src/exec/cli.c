@@ -232,41 +232,41 @@ static void readelf(const char *elf_path) {
     }
     printf("\n");
 
-    printf(" %-35s: %s\n", "Class", readelf.class);
+    printf(" %-35s: %s\n", "Class", readelf.clazz);
     printf(" %-35s: %s\n", "Endianness", readelf.endianness);
-    printf(" %-35s: %u\n", "Version", readelf.ehdr->ehdr_ver);
+    printf(" %-35s: %u\n", "Version", readelf.ehdr->e_ident[EI_VERSION]);
     printf(" %-35s: %s\n", "OS/ABI", readelf.abi);
     printf(" %-35s: %s\n", "Type", readelf.type);
     printf(" %-35s: %s\n", "Architecture", readelf.architecture);
-    printf(" %-35s: 0x%08x\n", "Entry point", readelf.ehdr->entry);
+    printf(" %-35s: 0x%08x\n", "Entry point", readelf.ehdr->e_entry);
     printf(" %-35s: %u (bytes into file)\n", "Start of program headers",
-           readelf.ehdr->phdrs_off);
+           readelf.ehdr->e_phoff);
     printf(" %-35s: %u (bytes into file)\n", "Start of section headers",
-           readelf.ehdr->shdrs_off);
-    printf(" %-35s: 0x%x\n", "Flags", readelf.ehdr->flags);
-    printf(" %-35s: %u (bytes)\n", "Size of ELF header", readelf.ehdr->ehdr_sz);
+           readelf.ehdr->e_shoff);
+    printf(" %-35s: 0x%x\n", "Flags", readelf.ehdr->e_flags);
+    printf(" %-35s: %u (bytes)\n", "Size of ELF header",
+           readelf.ehdr->e_ehsize);
     printf(" %-35s: %u (bytes)\n", "Size of each program header",
-           readelf.ehdr->phent_sz);
-    printf(" %-35s: %u\n", "Number of program headers",
-           readelf.ehdr->phent_num);
+           readelf.ehdr->e_phentsize);
+    printf(" %-35s: %u\n", "Number of program headers", readelf.ehdr->e_phnum);
     printf(" %-35s: %u (bytes)\n", "Size of each section header",
-           readelf.ehdr->shent_sz);
-    printf(" %-35s: %u\n", "Number of section headers",
-           readelf.ehdr->shent_num);
+           readelf.ehdr->e_shentsize);
+    printf(" %-35s: %u\n", "Number of section headers", readelf.ehdr->e_shnum);
     printf(" %-35s: %u\n", "Section header string table index",
-           readelf.ehdr->shdr_str_idx);
+           readelf.ehdr->e_shstrndx);
     printf("\n");
 
     printf("Section headers:\n");
     printf(" [Nr] %-17s %-15s %-10s %-10s %-10s %-5s %-5s\n", "Name", "Type",
            "Address", "Offset", "Size", "Flags", "Align");
 
-    for (u32 i = 0; i < readelf.ehdr->shent_num; i++) {
-        ReadElfSection *sec = &readelf.shdrs[i];
+    for (u32 i = 0; i < readelf.ehdr->e_shnum; i++) {
+        ReadElfSection *sec = readelf.shdrs + i;
         // clang-format off
         printf(" [%2u] %-17s %-15s 0x%08x 0x%08x 0x%08x %5s %5u\n",
-                i, sec->name, sec->type, sec->shdr->virt_addr,
-               sec->shdr->off, sec->shdr->mem_sz, sec->flags, sec->shdr->align);
+                i, sec->name, sec->type, sec->shdr->sh_addr,
+               sec->shdr->sh_offset, sec->shdr->sh_size, sec->flags,
+               sec->shdr->sh_addralign);
         // clang-format on
     }
     printf("\n");
@@ -274,12 +274,12 @@ static void readelf(const char *elf_path) {
     printf("Program headers:\n");
     printf(" %-14s %-10s %-15s %-16s %-10s %-5s %-5s\n", "Type", "Offset",
            "Virtual Address", "Physical Address", "Size", "Flags", "Align");
-    for (u32 i = 0; i < readelf.ehdr->phent_num; i++) {
-        ReadElfSegment *seg = &readelf.phdrs[i];
+    for (u32 i = 0; i < readelf.ehdr->e_phnum; i++) {
+        ReadElfSegment *seg = readelf.phdrs + i;
         // clang-format off
         printf(" %-14s 0x%08x 0x%08x      0x%08x       0x%08x %5s %5u\n",
-                seg->type, seg->phdr->off, seg->phdr->virt_addr, seg->phdr->phys_addr,
-                seg->phdr->mem_sz, seg->flags, seg->phdr->align);
+                seg->type, seg->phdr->p_offset, seg->phdr->p_vaddr, seg->phdr->p_paddr,
+                seg->phdr->p_memsz, seg->flags, seg->phdr->p_align);
         // clang-format on
     }
     printf("\n");
@@ -288,6 +288,8 @@ exit:
     if (error) fprintf(stderr, "readelf: %s\n", error);
     if (elf) fclose(elf);
     free(elf_contents);
+    free(readelf.phdrs);
+    free(readelf.shdrs);
 }
 
 static void hexdump(const char *file_path) {

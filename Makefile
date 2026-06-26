@@ -5,8 +5,8 @@ ARES_FLAGS ?= -g3
 LIBFUZZER_FLAGS ?= $(ARES_FLAGS) -fsanitize=address -fsanitize=fuzzer
 AFL_FLAGS ?= $(ARES_FLAGS) -O2 -fsanitize=address
 
-EXEC_SRC = src/exec/core.c src/exec/emulate.c src/exec/callsan.c src/exec/dev.c
-SRC = $(EXEC_SRC) src/exec/cli.c src/exec/elf.c
+EXEC_SRC = src/exec/core.c src/exec/emulate.c src/exec/callsan.c src/exec/dev.c src/exec/elf.c
+SRC = $(EXEC_SRC) src/exec/cli.c
 AFLSRC = $(EXEC_SRC) src/exec/afl.c
 FUZZER_SRC = $(EXEC_SRC) src/exec/libfuzzer.c
 TEST_SRC = $(EXEC_SRC) src/test/test.c src/unity/src/unity.c  
