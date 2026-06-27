@@ -393,7 +393,9 @@ int main(int argc, const char *const *const argv) {
     if (strcmp(command, "help") == 0) {
         printf("Usage: %s <command> [--callsan] <file>\n\n", argv[0]);
         printf("Commands:\n");
-        printf("  assemble   <file>   Assemble a source file\n");
+        printf(
+            "  check      <file>   Check a source file for assembly language "
+            "errors\n");
         printf(
             "  emulate    <file>   Emulate from source (supports --callsan)\n");
         printf("  runelf     <file>   Run an ELF file (supports --callsan)\n");
@@ -423,9 +425,8 @@ int main(int argc, const char *const *const argv) {
     }
 
     // Route to appropriate function
-    if (strcmp(command, "assemble") == 0) {
+    if (strcmp(command, "check") == 0) {
         char *text = assemble_from_file(file_path, false);
-        // TODO: emit object
         free(text);
     } else if (strcmp(command, "emulate") == 0) {
         emulate_from_source(file_path, use_callsan);

@@ -145,7 +145,7 @@ check:
     for (u32 i = 1; i < ehdr->e_shnum; i++) {
         Elf32_Shdr *shdr = shdrs + i;
 
-        if ((str_sh != NULL && shdr->sh_name >= str_sh->sh_size) ||
+        if ((str_sh && shdr->sh_name >= str_sh->sh_size) ||
             (shdr->sh_type != SHT_NOBITS &&
              (shdr->sh_offset > elf_len ||
               sum_overflows(shdr->sh_offset, shdr->sh_size) ||
