@@ -21,10 +21,10 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
 // axiom) for all functions whose arguments include something like u8
 // *elf_contents is that the pointer be backed by malloc'd memory. The pointer
 // itself shall either point to the start of the malloc'd buffer, or shall
-// otherwise have equivalent alignment.
+// otherwise have equivalent alignment
 
 // SAFETY: for functions that alter global or external state (e.g., elf_load),
-// an additional precondition is that the caller not free u8 *elf_contents util
+// an additional precondition is that the caller not free u8 *elf_contents utill
 // program exit, or untill global cleanup/reset
 
 // NOTE: we do not support ELF files with entry (eh, ph, sh) sizes that don't
@@ -295,7 +295,7 @@ bool elf_read(u8 *elf_contents, u32 elf_len, ReadElfResult *out_res,
     if (ehdr->e_phnum == 0) goto skip_phdrs;
     Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
     readable_phdrs = malloc(sizeof(ReadElfSegment) * ehdr->e_phnum);
-    ARES_CHECK_OOM(readable_phdrs);
+    ares_panic_if_null(readable_phdrs);
 
     for (u32 i = 0; i < ehdr->e_phnum; i++) {
         Elf32_Phdr *phdr = phdrs + i;
@@ -340,7 +340,7 @@ skip_phdrs:;
     if (ehdr->e_shnum == 0) goto skip_shdrs;
     Elf32_Shdr *shdrs = (void *)(elf_contents + ehdr->e_shoff);
     readable_shdrs = malloc(sizeof(ReadElfSection) * ehdr->e_shnum);
-    ARES_CHECK_OOM(readable_shdrs);
+    ares_panic_if_null(readable_shdrs);
 
     // Guaranteed to be safe by shdrs_check
     Elf32_Shdr *str_sh = NULL;
@@ -413,7 +413,7 @@ bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error) {
         if (phdr->p_type != PT_LOAD || phdr->p_memsz == 0) continue;
 
         Section *s = calloc(1, sizeof(*s));
-        ARES_CHECK_OOM(s);
+        ares_panic_if_null(s);
         s->read = phdr->p_flags & PF_R;
         s->write = phdr->p_flags & PF_W;
         s->execute = phdr->p_flags & PF_X;
@@ -423,7 +423,7 @@ bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error) {
 
         s->contents.cap = s->contents.len = phdr->p_memsz;
         s->contents.buf = calloc(1, s->contents.len);
-        ARES_CHECK_OOM(s->contents.buf);
+        ares_panic_if_null(s->contents.buf);
         // NOTE: we know file size <= memory size (checked above)
         memcpy(s->contents.buf, elf_contents + phdr->p_offset, phdr->p_filesz);
         s->limit = s->base + s->contents.len;

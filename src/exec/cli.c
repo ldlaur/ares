@@ -155,7 +155,7 @@ static char *assemble_from_file(const char *src_path, bool allow_externs) {
     size_t s = ftell(f);
     rewind(f);
     char *text = malloc(s);
-    ARES_CHECK_OOM(text);
+    ares_panic_if_null(text);
     fread(text, s, 1, f);
     fclose(f);
 
@@ -189,7 +189,7 @@ static void run_elf(const char *elf_path, bool use_callsan) {
     rewind(elf);
 
     elf_contents = malloc(sz);
-    ARES_CHECK_OOM(elf_contents);
+    ares_panic_if_null(elf_contents);
 
     fread(elf_contents, sz, 1, elf);
 
@@ -228,7 +228,7 @@ static void readelf(const char *elf_path) {
     rewind(elf);
 
     elf_contents = malloc(sz);
-    ARES_CHECK_OOM(elf_contents);
+    ares_panic_if_null(elf_contents);
 
     fread(elf_contents, sz, 1, elf);
     ReadElfResult readelf = {0};

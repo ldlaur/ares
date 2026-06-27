@@ -2160,13 +2160,13 @@ export void assemble(const char *txt, size_t s, bool allow_externs) {
     emulator_init();
 
     g_text = malloc(sizeof(*g_text));
-    ARES_CHECK_OOM(g_text);
+    ares_panic_if_null(g_text);
     g_data = malloc(sizeof(*g_data));
-    ARES_CHECK_OOM(g_data);
+    ares_panic_if_null(g_data);
     g_kernel_data = malloc(sizeof(*g_kernel_data));
-    ARES_CHECK_OOM(g_kernel_data);
+    ares_panic_if_null(g_kernel_data);
     g_kernel_text = malloc(sizeof(*g_kernel_text));
-    ARES_CHECK_OOM(g_kernel_text);
+    ares_panic_if_null(g_kernel_text);
 
     *g_text = (Section){.name = ".text",
                         .base = TEXT_BASE,
@@ -2565,7 +2565,7 @@ bool resolve_symbol(const char *sym, size_t sym_len, bool global, u32 *addr,
 
 void prepare_aux_sections(void) {
     g_stack = malloc(sizeof(Section));
-    ARES_CHECK_OOM(g_stack);
+    ares_panic_if_null(g_stack);
     *g_stack = (Section){.name = "ARES_STACK",
                          .base = STACK_TOP - STACK_LEN,
                          .limit = STACK_TOP,
@@ -2584,7 +2584,7 @@ void prepare_aux_sections(void) {
                             // does STACK_TOP - 4
 
     g_mmio = malloc(sizeof(*g_mmio));
-    ARES_CHECK_OOM(g_mmio);
+    ares_panic_if_null(g_mmio);
     *g_mmio = (Section){.name = ".mmio",
                         .base = MMIO_BASE,
                         .limit = MMIO_END,
