@@ -150,9 +150,10 @@ check:
              (shdr->sh_offset > elf_len ||
               sum_overflows(shdr->sh_offset, shdr->sh_size) ||
               shdr->sh_offset + shdr->sh_size > elf_len)) ||
-            shdr->sh_flags & ~(SHF_WRITE | SHF_ALLOC | SHF_EXECINSTR |
-                               SHF_MERGE | SHF_STRINGS | SHF_INFO_LINK |
-                               SHF_OS_NONCONFORMING | SHF_TLS) ||
+            shdr->sh_flags &
+                ~(SHF_WRITE | SHF_ALLOC | SHF_EXECINSTR | SHF_MERGE |
+                  SHF_STRINGS | SHF_INFO_LINK | SHF_OS_NONCONFORMING | SHF_TLS |
+                  SHF_GROUP | SHF_LINK_ORDER) ||
             (shdr->sh_addralign > 1 && !is_pow2(shdr->sh_addralign)) ||
             (shdr->sh_entsize != 0 && shdr->sh_size % shdr->sh_entsize != 0) ||
             (shdr->sh_type == SHT_STRTAB &&
