@@ -177,14 +177,13 @@ static bool shdrs_check(Elf32_Ehdr *ehdr, u32 elf_len, char **out_error) {
     for (u32 i = 0; i < ehdr->e_shnum; i++) {
         Elf32_Shdr *shdr = shdrs + i;
 
+        // SAFETY: as was done for phdrs, flag checks were removed to avoid
+        // rejecting perfectly good files, espeicaly considering that the these
+        // flags are never used
         if ((str_sh && shdr->sh_name >= str_sh->sh_size) ||
             (shdr->sh_type != SHT_NOBITS &&
              (sum_overflows(shdr->sh_offset, shdr->sh_size) ||
               shdr->sh_offset + shdr->sh_size > elf_len)) ||
-            shdr->sh_flags &
-                ~(SHF_WRITE | SHF_ALLOC | SHF_EXECINSTR | SHF_MERGE |
-                  SHF_STRINGS | SHF_INFO_LINK | SHF_OS_NONCONFORMING | SHF_TLS |
-                  SHF_GROUP | SHF_LINK_ORDER) ||
             (shdr->sh_addralign > 1 && !is_pow2(shdr->sh_addralign)) ||
             (shdr->sh_entsize != 0 && shdr->sh_size % shdr->sh_entsize != 0) ||
             (shdr->sh_type == SHT_STRTAB && shdr->sh_size > 0 &&
@@ -406,6 +405,7 @@ bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error) {
     }
 
     // Load program headers
+    // TODO: check for overlapping segments
     Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
     for (u32 i = 0; i < ehdr->e_phnum; i++) {
         Elf32_Phdr *phdr = phdrs + i;
@@ -439,6 +439,7 @@ bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error) {
     char *strtab = (void *)(elf_contents + str_sh->sh_offset);
 
     // Use a simple heuristic to resolve section names (when possible)
+    // NOTE: section names are not crucial
     for (u32 i = 1; i < ehdr->e_shnum; i++) {
         Elf32_Shdr *shdr = shdrs + i;
         if (!(shdr->sh_flags & SHF_ALLOC)) continue;
@@ -455,6 +456,9 @@ bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error) {
 
 exit:
     emulator_init();
+    // NOTE: ARES does not generate native code, it runs instructions in an
+    // emulation loop, and thus checks memory accesses when they happen. g_pc
+    // can thus be assigned any value here
     g_pc = ehdr->e_entry;
     return true;
 }
