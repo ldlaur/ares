@@ -445,8 +445,11 @@ typedef struct {
     ReadElfRelaSection *relas;
 } ReadElfResult;
 
-bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
+// elf_read works on a slightly wider range of files compared to elf_load, thus
+// it performs fewer checks. This is in part to allow inspection of malformed or
+// corrupted files.
+bool elf_read(u8 *elf_contents, u32 elf_len, ReadElfResult *out_res,
               char **out_error);
-bool elf_load(u8 *elf_contents, size_t elf_len, char **out_error);
+bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error);
 
 #endif

@@ -182,6 +182,10 @@ static void run_elf(const char *elf_path, bool use_callsan) {
 
     fseek(elf, 0, SEEK_END);
     size_t sz = ftell(elf);
+    if (sz > UINT32_MAX) {
+        error = "file size exceeds the maximum value";
+        goto exit;
+    }
     rewind(elf);
 
     elf_contents = malloc(sz);
@@ -217,6 +221,10 @@ static void readelf(const char *elf_path) {
 
     fseek(elf, 0, SEEK_END);
     size_t sz = ftell(elf);
+    if (sz > UINT32_MAX) {
+        error = "file size exceeds maximum value";
+        goto exit;
+    }
     rewind(elf);
 
     elf_contents = malloc(sz);

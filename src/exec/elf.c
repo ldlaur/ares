@@ -1,3 +1,10 @@
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
+               "This code requires a little-endian target");
+#else
+#error "Cannot determine target endianness"
+#endif
+
 #include "ares/elf.h"
 
 #include <stddef.h>
@@ -10,6 +17,21 @@
 #include "ares/emulate.h"
 #include "ares/util.h"
 
+// SAFETY: an implicit precondition (maintained by callers in other files -
+// axiom) for all functions whose arguments include something like u8
+// *elf_contents is that the pointer be backed by malloc'd memory. The pointer
+// itself shall either point to the start of the malloc'd buffer, or shall
+// otherwise have equivalent alignment.
+
+// SAFETY: for functions that alter global or external state (e.g., elf_load),
+// an additional precondition is that the caller not free u8 *elf_contents util
+// program exit, or untill global cleanup/reset
+
+// NOTE: we do not support ELF files with entry (eh, ph, sh) sizes that don't
+// match those of library structs. This violates the specification and rejects
+// perfectly valid files, but it's rare, cursed, unlikely to be of any use here,
+// and dangerous (easy to mess up)
+
 #define UNKNOWN_PROP "Unknown"
 
 static bool sum_overflows(u32 a, u32 b) { return a > UINT32_MAX - b; }
@@ -18,8 +40,7 @@ static bool mul_overflows(u32 a, u32 b) {
     return a != 0 && b != 0 && a > UINT32_MAX / b;
 }
 
-static Elf32_Ehdr *ehdr_check(u8 *elf_contents, size_t elf_len,
-                              char **out_error) {
+static Elf32_Ehdr *ehdr_check(u8 *elf_contents, u32 elf_len, char **out_error) {
     if (!elf_contents) {
         *out_error = "null buffer";
         return NULL;
@@ -56,12 +77,17 @@ static Elf32_Ehdr *ehdr_check(u8 *elf_contents, size_t elf_len,
         return NULL;
     }
 
+    if (ehdr->e_ident[EI_DATA] != ELFDATA2LSB) {
+        *out_error = "not a little endian elf";
+        return NULL;
+    }
+
     return ehdr;
 }
 
 // pre: elf_contents points to a valid elf header
 // pre: endianness compatibility guaranteed
-static bool ehdr_check_offsets(Elf32_Ehdr *ehdr, size_t elf_len,
+static bool ehdr_check_offsets(Elf32_Ehdr *ehdr, u32 elf_len,
                                char **out_error) {
     if (ehdr->e_phentsize != sizeof(Elf32_Phdr) && ehdr->e_phnum > 0) {
         *out_error = "incompatible program header size";
@@ -73,18 +99,20 @@ static bool ehdr_check_offsets(Elf32_Ehdr *ehdr, size_t elf_len,
         return false;
     }
 
-    if ((ehdr->e_phoff == 0 && ehdr->e_phnum > 0) || ehdr->e_phoff > elf_len ||
+    if ((ehdr->e_phoff == 0 && ehdr->e_phnum > 0) ||
         mul_overflows(ehdr->e_phnum, sizeof(Elf32_Phdr)) ||
         sum_overflows(ehdr->e_phoff, ehdr->e_phnum * sizeof(Elf32_Phdr)) ||
-        ehdr->e_phoff + ehdr->e_phnum * sizeof(Elf32_Phdr) > elf_len) {
+        ehdr->e_phoff + ehdr->e_phnum * sizeof(Elf32_Phdr) > elf_len ||
+        ehdr->e_phoff % _Alignof(Elf32_Phdr) != 0) {
         *out_error = "malformed program header information";
         return false;
     }
 
-    if ((ehdr->e_shoff == 0 && ehdr->e_shnum > 0) || ehdr->e_shoff > elf_len ||
+    if ((ehdr->e_shoff == 0 && ehdr->e_shnum > 0) ||
         mul_overflows(ehdr->e_shnum, sizeof(Elf32_Shdr)) ||
         sum_overflows(ehdr->e_shoff, ehdr->e_shnum * sizeof(Elf32_Shdr)) ||
-        ehdr->e_shoff + ehdr->e_shnum * sizeof(Elf32_Shdr) > elf_len) {
+        ehdr->e_shoff + ehdr->e_shnum * sizeof(Elf32_Shdr) > elf_len ||
+        ehdr->e_shoff % _Alignof(Elf32_Shdr) != 0) {
         *out_error = "malformed section header information";
         return false;
     }
@@ -98,19 +126,20 @@ static bool ehdr_check_offsets(Elf32_Ehdr *ehdr, size_t elf_len,
 }
 
 // pre: ehdr is inside a larger buffer containing the entire ELF
-static bool phdrs_check(Elf32_Ehdr *ehdr, size_t elf_len, char **out_error) {
+static bool phdrs_check(Elf32_Ehdr *ehdr, u32 elf_len, char **out_error) {
     u8 *elf_contents = (void *)ehdr;
     Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
 
     for (u32 i = 0; i < ehdr->e_phnum; i++) {
         Elf32_Phdr *phdr = phdrs + i;
 
-        if (phdr->p_offset > elf_len ||
-            sum_overflows(phdr->p_offset, phdr->p_filesz) ||
+        // SAFETY: flags check against PF_R | PF_W | PF_X removed to allow files
+        // with special flags (allowed by the specification). If used for
+        // emulation (elf_load), unsupported flags will just be ignored
+        if (sum_overflows(phdr->p_offset, phdr->p_filesz) ||
             phdr->p_offset + phdr->p_filesz > elf_len ||
             phdr->p_filesz > phdr->p_memsz ||
             sum_overflows(phdr->p_vaddr, phdr->p_memsz) ||
-            phdr->p_flags & ~(PF_R | PF_W | PF_X) ||
             (phdr->p_align > 1 && !is_pow2(phdr->p_align)) ||
             (phdr->p_type == PT_LOAD && phdr->p_align > 1 &&
              phdr->p_vaddr % phdr->p_align != phdr->p_offset % phdr->p_align)) {
@@ -123,28 +152,34 @@ static bool phdrs_check(Elf32_Ehdr *ehdr, size_t elf_len, char **out_error) {
 }
 
 // pre: ehdr is inside a larger buffer containing the entire ELF
-static bool shdrs_check(Elf32_Ehdr *ehdr, size_t elf_len, char **out_error) {
+static bool shdrs_check(Elf32_Ehdr *ehdr, u32 elf_len, char **out_error) {
     u8 *elf_contents = (void *)ehdr;
     Elf32_Shdr *shdrs = (void *)(elf_contents + ehdr->e_shoff);
     Elf32_Shdr *str_sh = NULL;
 
-    if (ehdr->e_shstrndx == SHN_UNDEF) goto check;
-    str_sh = shdrs + ehdr->e_shstrndx;
+    if (ehdr->e_shstrndx != SHN_UNDEF) {
+        // SAFETY: bounds already checked in ehdr_check_offsets
+        str_sh = shdrs + ehdr->e_shstrndx;
+        if (str_sh->sh_type != SHT_STRTAB) {
+            *out_error = "section header string table has wrong type";
+            return false;
+        }
+    }
 
-check:
     if (ehdr->e_shnum == 0) return true;
     if (shdrs[0].sh_type != SHT_NULL) {
         *out_error = "malformed null section";
         return false;
     }
 
-    for (u32 i = 1; i < ehdr->e_shnum; i++) {
+    // SAFETY: checking the null section is important, especially around the
+    // name offset
+    for (u32 i = 0; i < ehdr->e_shnum; i++) {
         Elf32_Shdr *shdr = shdrs + i;
 
         if ((str_sh && shdr->sh_name >= str_sh->sh_size) ||
             (shdr->sh_type != SHT_NOBITS &&
-             (shdr->sh_offset > elf_len ||
-              sum_overflows(shdr->sh_offset, shdr->sh_size) ||
+             (sum_overflows(shdr->sh_offset, shdr->sh_size) ||
               shdr->sh_offset + shdr->sh_size > elf_len)) ||
             shdr->sh_flags &
                 ~(SHF_WRITE | SHF_ALLOC | SHF_EXECINSTR | SHF_MERGE |
@@ -152,9 +187,8 @@ check:
                   SHF_GROUP | SHF_LINK_ORDER) ||
             (shdr->sh_addralign > 1 && !is_pow2(shdr->sh_addralign)) ||
             (shdr->sh_entsize != 0 && shdr->sh_size % shdr->sh_entsize != 0) ||
-            (shdr->sh_type == SHT_STRTAB &&
-             (shdr->sh_size == 0 ||
-              elf_contents[shdr->sh_offset + shdr->sh_size - 1] != 0))) {
+            (shdr->sh_type == SHT_STRTAB && shdr->sh_size > 0 &&
+             elf_contents[shdr->sh_offset + shdr->sh_size - 1] != 0)) {
             *out_error = "one or more malformed section headers";
             return false;
         }
@@ -164,23 +198,18 @@ check:
 }
 
 // pre: ehdr is inside a larger buffer containing the entire ELF
-static bool ehdr_checkentries(Elf32_Ehdr *ehdr, size_t elf_len,
-                              char **out_error) {
+static bool ehdr_check_entries(Elf32_Ehdr *ehdr, u32 elf_len,
+                               char **out_error) {
     return ehdr_check_offsets(ehdr, elf_len, out_error) &&
            phdrs_check(ehdr, elf_len, out_error) &&
            shdrs_check(ehdr, elf_len, out_error);
 }
 
-static Elf32_Ehdr *elf_check_full(u8 *elf_contents, size_t elf_len,
+static Elf32_Ehdr *elf_check_full(u8 *elf_contents, u32 elf_len,
                                   char **out_error) {
     Elf32_Ehdr *ehdr = ehdr_check(elf_contents, elf_len, out_error);
     if (!ehdr) return NULL;
-    if (!ehdr_checkentries(ehdr, elf_len, out_error)) return NULL;
-
-    if (ehdr->e_ident[EI_DATA] != ELFDATA2LSB) {
-        *out_error = "not a little endian elf";
-        return NULL;
-    }
+    if (!ehdr_check_entries(ehdr, elf_len, out_error)) return NULL;
 
     if (ehdr->e_machine != EM_RISCV) {
         *out_error = "not a riscv elf";
@@ -195,7 +224,7 @@ static Elf32_Ehdr *elf_check_full(u8 *elf_contents, size_t elf_len,
     return ehdr;
 }
 
-bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
+bool elf_read(u8 *elf_contents, u32 elf_len, ReadElfResult *out_res,
               char **out_error) {
     // SAFETY: ensure pointers are NULL so free doesn't cause issues for
     // uninitialized inputs when this function fails
@@ -234,8 +263,7 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         out_res->abi = "UNIX - System V";
     } else if (ehdr->e_ident[EI_OSABI] == ELFOSABI_LINUX) {
         out_res->abi = "Linux";
-    }  // ...
-    else {
+    } else {
         out_res->abi = UNKNOWN_PROP;
     }
 
@@ -263,8 +291,8 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         out_res->architecture = UNKNOWN_PROP;
     }
 
-    // SAFETY: not UB because phoff is guaranteed to be in bounds by
-    // ehdr_check_offsets (called before)
+    // SAFETY: bounds are already checked, but we want to avoid malloc(0)
+    if (ehdr->e_phnum == 0) goto skip_phdrs;
     Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
     readable_phdrs = malloc(sizeof(ReadElfSegment) * ehdr->e_phnum);
     ARES_CHECK_OOM(readable_phdrs);
@@ -272,7 +300,7 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
     for (u32 i = 0; i < ehdr->e_phnum; i++) {
         Elf32_Phdr *phdr = phdrs + i;
         ReadElfSegment *readable = readable_phdrs + i;
-        size_t flags_idx = 0;
+        u32 flags_idx = 0;
 
         readable->phdr = phdr;
         if (phdr->p_flags & PF_R) readable->flags[flags_idx++] = 'R';
@@ -307,8 +335,9 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         }
     }
 
-    // SAFETY: not UB because shoff is guaranteed to be in bounds by
-    // ehdr_check_offsets (called before)
+skip_phdrs:;
+    // SAFETY: bounds are already checked, but we want to avoid malloc(0)
+    if (ehdr->e_shnum == 0) goto skip_shdrs;
     Elf32_Shdr *shdrs = (void *)(elf_contents + ehdr->e_shoff);
     readable_shdrs = malloc(sizeof(ReadElfSection) * ehdr->e_shnum);
     ARES_CHECK_OOM(readable_shdrs);
@@ -327,7 +356,7 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
     for (u32 i = 0; i < ehdr->e_shnum; i++) {
         Elf32_Shdr *shdr = shdrs + i;
         ReadElfSection *readable = readable_shdrs + i;
-        size_t flags_idx = 0;
+        u32 flags_idx = 0;
 
         readable->shdr = shdr;
         if (shdr->sh_flags & SHF_WRITE) readable->flags[flags_idx++] = 'W';
@@ -361,12 +390,13 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         }
     }
 
+skip_shdrs:
     out_res->phdrs = readable_phdrs;
     out_res->shdrs = readable_shdrs;
     return true;
 }
 
-bool elf_load(u8 *elf_contents, size_t elf_len, char **out_error) {
+bool elf_load(u8 *elf_contents, u32 elf_len, char **out_error) {
     Elf32_Ehdr *ehdr = elf_check_full(elf_contents, elf_len, out_error);
     if (!ehdr) return false;
 
@@ -379,7 +409,8 @@ bool elf_load(u8 *elf_contents, size_t elf_len, char **out_error) {
     Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
     for (u32 i = 0; i < ehdr->e_phnum; i++) {
         Elf32_Phdr *phdr = phdrs + i;
-        if (phdr->p_type != PT_LOAD) continue;
+        // SAFETY: zero-sized segments are problematic
+        if (phdr->p_type != PT_LOAD || phdr->p_memsz == 0) continue;
 
         Section *s = calloc(1, sizeof(*s));
         ARES_CHECK_OOM(s);
