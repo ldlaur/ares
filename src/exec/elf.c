@@ -12,10 +12,6 @@
 
 #define UNKNOWN_PROP "Unknown"
 
-#define STRTAB_ISTR 1   // Index of .strtab in strtab
-#define STRTAB_ISYM 9   // Index of .symtab in strtab
-#define STRTAB_ISEC 17  // Start of section names in strtab
-
 static bool sum_overflows(u32 a, u32 b) { return a > UINT32_MAX - b; }
 static bool is_pow2(u32 val) { return val != 0 && (val & (val - 1)) == 0; }
 static bool mul_overflows(u32 a, u32 b) {
@@ -201,8 +197,8 @@ static Elf32_Ehdr *elf_check_full(u8 *elf_contents, size_t elf_len,
 
 bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
               char **out_error) {
-    // Ensure pointers are NULL so free doesn't cause issues for uninitialized
-    // inputs when this function fails
+    // SAFETY: ensure pointers are NULL so free doesn't cause issues for
+    // uninitialized inputs when this function fails
     out_res->phdrs = NULL;
     out_res->shdrs = NULL;
 
@@ -211,8 +207,8 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         return false;
     }
 
-    // NOTE: we check fewer things here because we want elf_read to work on a
-    // wider range of files
+    // SAFETY: NOTE: we check fewer things here because we want elf_read to work
+    // on a wider range of files
     ReadElfSegment *readable_phdrs = NULL;
     ReadElfSection *readable_shdrs = NULL;
     Elf32_Ehdr *ehdr = ehdr_check(elf_contents, elf_len, out_error);
@@ -267,6 +263,8 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         out_res->architecture = UNKNOWN_PROP;
     }
 
+    // SAFETY: not UB because phoff is guaranteed to be in bounds by
+    // ehdr_check_offsets (called before)
     Elf32_Phdr *phdrs = (void *)(elf_contents + ehdr->e_phoff);
     readable_phdrs = malloc(sizeof(ReadElfSegment) * ehdr->e_phnum);
     ARES_CHECK_OOM(readable_phdrs);
@@ -309,6 +307,8 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         }
     }
 
+    // SAFETY: not UB because shoff is guaranteed to be in bounds by
+    // ehdr_check_offsets (called before)
     Elf32_Shdr *shdrs = (void *)(elf_contents + ehdr->e_shoff);
     readable_shdrs = malloc(sizeof(ReadElfSection) * ehdr->e_shnum);
     ARES_CHECK_OOM(readable_shdrs);
@@ -321,8 +321,9 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         strtab = (void *)(elf_contents + str_sh->sh_offset);
     }
 
-    // NOTE: we can access these without checks now, because we only get here if
-    // checks passed earlier. THIS ALSO APPLIES TO sh_name!
+    // SAFETY: we can access these without checks now, because we only get here
+    // if checks passed earlier. THIS ALSO APPLIES TO sh_name! (checked in
+    // shdrs_check)
     for (u32 i = 0; i < ehdr->e_shnum; i++) {
         Elf32_Shdr *shdr = shdrs + i;
         ReadElfSection *readable = readable_shdrs + i;
@@ -334,7 +335,7 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
         if (shdr->sh_flags & SHF_STRINGS) readable->flags[flags_idx++] = 'S';
         if (shdr->sh_flags & SHF_EXECINSTR) readable->flags[flags_idx++] = 'X';
         readable->flags[flags_idx] = 0;
-        if (strtab != NULL) readable->name = strtab + shdr->sh_name;
+        if (strtab) readable->name = strtab + shdr->sh_name;
         else readable->name = UNKNOWN_PROP;
 
         switch (shdr->sh_type) {
@@ -365,12 +366,12 @@ bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
     return true;
 }
 
-bool elf_load(u8 *elf_contents, size_t elf_len, char **error) {
-    Elf32_Ehdr *ehdr = elf_check_full(elf_contents, elf_len, error);
+bool elf_load(u8 *elf_contents, size_t elf_len, char **out_error) {
+    Elf32_Ehdr *ehdr = elf_check_full(elf_contents, elf_len, out_error);
     if (!ehdr) return false;
 
     if (ehdr->e_type != ET_EXEC) {
-        *error = "not an elf executable";
+        *out_error = "not an elf executable";
         return false;
     }
 

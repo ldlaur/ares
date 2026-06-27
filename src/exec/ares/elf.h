@@ -445,8 +445,8 @@ typedef struct {
     ReadElfRelaSection *relas;
 } ReadElfResult;
 
-bool elf_read(u8 *elf_contents, size_t elf_contents_len, ReadElfResult *out,
-              char **error);
-bool elf_load(u8 *elf_contents, size_t elf_len, char **error);
+bool elf_read(u8 *elf_contents, size_t elf_len, ReadElfResult *out_res,
+              char **out_error);
+bool elf_load(u8 *elf_contents, size_t elf_len, char **out_error);
 
 #endif
