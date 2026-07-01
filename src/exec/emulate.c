@@ -1179,6 +1179,7 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
                 APPEND_REG(extr(cinst, 11, 7));
                 APPEND_STR(", ");
                 APPEND_U32(c_lwsp_off(cinst));
+                APPEND_STR("(sp)");
                 goto done;
             }
             if (cfunct3 == 0b100) {
@@ -1228,6 +1229,7 @@ size_t disassemble(u32 inst, char *buf, size_t buflen) {
                 APPEND_REG(extr(cinst, 6, 2));
                 APPEND_STR(", ");
                 APPEND_U32(c_swsp_off(cinst));
+                APPEND_STR("(sp)");
                 goto done;
             }
         }

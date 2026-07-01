@@ -392,6 +392,8 @@ bool str_eq_case(const char *txt, size_t len, const char *c) {
 
 bool str_eq_2(const char *s1, size_t s1len, const char *s2, size_t s2len) {
     if (s1len != s2len) return false;
+    // both 0. i need this to avoid memcmp(NULL, NULL, 0) UB
+    if (s1len == 0) return true;
     return memcmp(s1, s2, s1len) == 0;
 }
 
@@ -1455,7 +1457,7 @@ const char *handle_csr_imm(Parser *p, const char *opcode, size_t opcode_len) {
 // compressed handlers
 
 const char *handle_c_lwsp(Parser *p, const char *opcode, size_t opcode_len) {
-    Reg d;
+    Reg d, s;
     i32 simm;
 
     skip_trailing(p);
@@ -1470,12 +1472,22 @@ const char *handle_c_lwsp(Parser *p, const char *opcode, size_t opcode_len) {
     if (simm < 0 || simm > 255) return "Out of bounds immediate";
     if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
+    skip_trailing(p);
+    if (!consume_if(p, '(')) return "Expected (";
+
+    skip_trailing(p);
+    if ((s = parse_reg(p)) == -1) return "Invalid rs1";
+    if (s != REG_SP) return "register must be sp";
+
+    skip_trailing(p);
+    if (!consume_if(p, ')')) return "Expected )";
+
     asm_emit_16(C_LWSP(d, simm), p->startline);
     return NULL;
 }
 
 const char *handle_c_swsp(Parser *p, const char *opcode, size_t opcode_len) {
-    Reg s2;
+    Reg s2, s;
     i32 simm;
 
     skip_trailing(p);
@@ -1488,6 +1500,16 @@ const char *handle_c_swsp(Parser *p, const char *opcode, size_t opcode_len) {
     if (!parse_numeric(p, &simm)) return "Invalid immediate";
     if (simm < 0 || simm > 255) return "Out of bounds immediate";
     if (simm % 4 != 0) return "Immediate must be a multiple of 4";
+
+    skip_trailing(p);
+    if (!consume_if(p, '(')) return "Expected (";
+
+    skip_trailing(p);
+    if ((s = parse_reg(p)) == -1) return "Invalid rs1";
+    if (s != REG_SP) return "register must be sp";
+
+    skip_trailing(p);
+    if (!consume_if(p, ')')) return "Expected )";
 
     asm_emit_16(C_SWSP(s2, simm), p->startline);
     return NULL;
@@ -2140,13 +2162,13 @@ export void assemble(const char *txt, size_t s, bool allow_externs) {
     emulator_init();
 
     g_text = malloc(sizeof(*g_text));
-    ARES_CHECK_OOM(g_text);
+    ares_panic_if_null(g_text);
     g_data = malloc(sizeof(*g_data));
-    ARES_CHECK_OOM(g_data);
+    ares_panic_if_null(g_data);
     g_kernel_data = malloc(sizeof(*g_kernel_data));
-    ARES_CHECK_OOM(g_kernel_data);
+    ares_panic_if_null(g_kernel_data);
     g_kernel_text = malloc(sizeof(*g_kernel_text));
-    ARES_CHECK_OOM(g_kernel_text);
+    ares_panic_if_null(g_kernel_text);
 
     *g_text = (Section){.name = ".text",
                         .base = TEXT_BASE,
@@ -2227,7 +2249,7 @@ export void assemble(const char *txt, size_t s, bool allow_externs) {
             if (!parse_ident(p, &directive, &directive_len)) {
                 err = "Invalid directive";
                 break;
-            }                
+            }
             skip_trailing(p);
 
             if (str_eq_case(directive, directive_len, "section")) {
@@ -2257,7 +2279,10 @@ export void assemble(const char *txt, size_t s, bool allow_externs) {
                 skip_trailing(p);
                 const char *ident;
                 size_t ident_len;
-                parse_ident(p, &ident, &ident_len);
+                if (!parse_ident(p, &ident, &ident_len) || ident_len == 0) {
+                    err = "Expected identifier after .globl";
+                    break;
+                }
                 *ARES_ARRAY_PUSH(&g_globals) =
                     (Global){.str = ident, .len = ident_len};
                 continue;
@@ -2363,7 +2388,7 @@ export void assemble(const char *txt, size_t s, bool allow_externs) {
         // no-param instructions, like ret and nop
         skip_trailing(p);
 
-        if (consume_if(p, ':')) {
+        if (ident_len > 0 && consume_if(p, ':')) {
             for (size_t i = 0; i < ARES_ARRAY_LEN(&g_labels); i++) {
                 if (str_eq_2(ARES_ARRAY_GET(&g_labels, i)->txt,
                              ARES_ARRAY_GET(&g_labels, i)->len, ident,
@@ -2545,7 +2570,7 @@ bool resolve_symbol(const char *sym, size_t sym_len, bool global, u32 *addr,
 
 void prepare_aux_sections(void) {
     g_stack = malloc(sizeof(Section));
-    ARES_CHECK_OOM(g_stack);
+    ares_panic_if_null(g_stack);
     *g_stack = (Section){.name = "ARES_STACK",
                          .base = STACK_TOP - STACK_LEN,
                          .limit = STACK_TOP,
@@ -2564,7 +2589,7 @@ void prepare_aux_sections(void) {
                             // does STACK_TOP - 4
 
     g_mmio = malloc(sizeof(*g_mmio));
-    ARES_CHECK_OOM(g_mmio);
+    ares_panic_if_null(g_mmio);
     *g_mmio = (Section){.name = ".mmio",
                         .base = MMIO_BASE,
                         .limit = MMIO_END,

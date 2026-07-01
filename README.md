@@ -33,7 +33,7 @@ This initial release introduces the following core features:
 # Installation
 ## Command-line utilities
 > [!NOTE]
-The CLI version relies on ezld, so make sure you cloned recursively, or alternatively do `git submodule update --init --recursive`
+The test version relies on unity, so make sure you cloned recursively, or alternatively do `git submodule update --init --recursive`
 
 A working C compiler and 
 ```

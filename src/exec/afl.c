@@ -13,5 +13,6 @@ int main(void)
         src = realloc(src, len);
         memcpy(src, buf, len);
         assemble(src, len, false);
+        free_runtime();
     }
 }

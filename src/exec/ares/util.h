@@ -15,19 +15,20 @@ extern void panic();
 void *memcpy(void *dest, const void *src, size_t n);
 void *memset(void *dest, int c, size_t n);
 
-#define ARES_CHECK_OOM(ptr) \
-    if (!(ptr)) {           \
-        panic();            \
-    }
+static inline void ares_panic_if_null(void *ptr) {
+    if (!ptr) panic();
+}
 #else
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define ARES_CHECK_OOM(ptr)                 \
-    if (!(ptr)) {                           \
-        fprintf(stderr, "out of memory\n"); \
-        exit(137);                          \
+
+static inline void ares_panic_if_null(void *ptr) {
+    if (!ptr) {
+        fprintf(stderr, "out of memory\n");
+        exit(137);
     }
+}
 #endif
 
 #define ARES_ARRAY_TYPE(type) \
@@ -68,7 +69,7 @@ static inline void *ares_array_grow(void *arr, size_t *cap, size_t size) {
     if (oldcap) *cap = oldcap * 2;
     else *cap = 4;
     void *newarr = malloc(*cap * size);
-    ARES_CHECK_OOM(newarr);
+    ares_panic_if_null(newarr);
     memset(newarr, 0, *cap * size);
     if (arr) {
         memcpy(newarr, arr, oldcap * size);

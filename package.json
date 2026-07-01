@@ -4,31 +4,31 @@
   "description": "",
   "type": "module",
   "scripts": {
-    "start": "vite --config src/webui/vite.config.js",
-    "dev": "vite --config src/webui/vite.config.js",
-    "build": "vite build --config src/webui/vite.config.js",
-    "serve": "vite preview --config src/webui/vite.config.js"
+    "start": "vite --config src/webui/vite.config.ts",
+    "dev": "vite --config src/webui/vite.config.ts",
+    "build": "vite build --config src/webui/vite.config.ts",
+    "serve": "vite preview --config src/webui/vite.config.ts"
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^25.6.0",
-    "autoprefixer": "^10.4.27",
-    "postcss": "^8.5.9",
+    "@types/node": "^26.0.1",
+    "autoprefixer": "^10.5.2",
+    "postcss": "^8.5.16",
     "tailwindcss": "^3.4.17",
-    "typescript": "^6.0.2",
-    "vite": "^8.0.8",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.1",
     "vite-plugin-solid": "^2.11.12"
   },
   "dependencies": {
-    "@babel/runtime": "^7.29.2",
-    "@codemirror/commands": "^6.10.3",
-    "@codemirror/lint": "^6.9.5",
+    "@babel/runtime": "^8.0.0",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/lint": "^6.9.7",
     "@lezer/generator": "^1.8.0",
     "@lezer/highlight": "^1.2.3",
-    "@lezer/lr": "^1.4.8",
+    "@lezer/lr": "^1.4.10",
     "@solid-primitives/virtual": "^0.2.3",
-    "@tanstack/solid-virtual": "^3.13.23",
+    "@tanstack/solid-virtual": "^3.13.30",
     "codemirror": "^6.0.2",
-    "solid-js": "^1.9.12"
+    "solid-js": "^1.9.13"
   }
 }
