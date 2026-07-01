@@ -82,11 +82,11 @@ export const Settings : Component<{ close: () => void }> = (props) => {
                         </button>
                     </div>
                     <Show when={selection() == 0}>
-                        <div class="flex flex-col w-full gap-3 h-full border-l-[2px] theme-border justify-center">
+                        <div class="flex flex-col w-full gap-3 h-full border-l-[1px] theme-border justify-center">
                             <div class="flex flex-row justify-between gap-1 mt-2 ml-[10%] mr-[10%]">
                                 <p class="text-base4 text-lg font-bold self-center">Light Theme</p>
                                 <select
-                                    class="text-base4 w-[30%] theme-bg rounded-lg border-2 border-[var(--color-highlight-high)] p-2 focus:ring-blue-400 focus:border-blue-400 shadow-xs"
+                                    class="text-base4 w-[30%] theme-bg border-2 theme-border p-2 focus:ring-blue-400 focus:border-blue-400 shadow-xs"
                                     onChange={ e => ModifyTheme(e.target.value, true)}
                                     value={lightTheme()}
                                 >
@@ -99,7 +99,7 @@ export const Settings : Component<{ close: () => void }> = (props) => {
                             <div class="flex flex-row justify-between gap-1 mb-2 ml-[10%] mr-[10%]">
                                 <p class="text-base4 text-lg font-bold self-center">Dark Theme</p>
                                 <select
-                                    class="text-base4 w-[30%] theme-bg rounded-lg border-2 border-[var(--color-highlight-high)] p-2 focus:ring-blue-400 focus:border-blue-400 shadow-xs"
+                                    class="text-base4 w-[30%] theme-bg border-2 theme-border p-2 focus:ring-blue-400 focus:border-blue-400 shadow-xs"
                                     onChange={ e => ModifyTheme(e.target.value, false)}
                                     value={darkTheme()}
                                 >
@@ -116,7 +116,7 @@ export const Settings : Component<{ close: () => void }> = (props) => {
                         </div>
                     </Show>
                     <Show when={selection() == 1}>
-                        <div class="flex flex-col w-full h-full border-l-[2px] theme-border justify-center pl-[2%] pb-2 pt-2">
+                        <div class="flex flex-col w-full h-full border-l-[1px] theme-border justify-center pl-[2%] pb-2 pt-2">
                             <a class="text-3xl font-bold underline text-base4 hover:text-blue-400" href="https://github.com/ldlaur/ares" >
                                 ARES
                             </a>
