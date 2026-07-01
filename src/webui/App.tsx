@@ -8,7 +8,7 @@ import {
 import { emulator, testData } from ".";
 import { BacktraceView } from "./BacktraceView";
 import { Editor, EditorInterface } from "./Editor";
-import { EditorToolbar } from "./EditorToolbar";
+import { doSave, EditorToolbar } from "./EditorToolbar";
 import { MemoryView } from "./MemoryView";
 import { PaneResize } from "./PaneResize";
 import { RegisterTable } from "./RegisterTable";
@@ -17,6 +17,7 @@ import { TEXT_BASE } from "./core/RiscV";
 import { buildForLinter, consoleText, continueExecution, nextStep, quitDebug, reverseStep, run, runTestSuite, setBreakpointLines, singleStep, startDebug, state, testSuiteIndex, testSuiteResults } from "./EmulatorStore";
 import { TestSuiteViewer } from "./TestSuite";
 import { IntegratedHelp } from "./IntegratedHelp";
+import { Settings } from "./Settings";
 
 // TODO: exporting those to access them in Theme.ts, but if i do 
 // theming with constant CSS classes i shouldn't need this anyways
@@ -27,6 +28,7 @@ const localStorageKey = testsuiteName ? ("savedtext-" + testsuiteName) : "savedt
 const origText = localStorage.getItem(localStorageKey) || "";
 let editorInterface = new EditorInterface();
 export const [integratedHelp, setIntegratedHelp] = createSignal<boolean>(false);
+export const [showSettings, setShowSettings] = createSignal(false);
 
 const App: Component = () => {
 	onMount(() => {
@@ -34,7 +36,10 @@ const App: Component = () => {
 			// FIXME: this is deprecated but i'm not sure what is the correct successor
 			const prefix = isMac ? (event.ctrlKey && event.shiftKey) : (event.ctrlKey && event.altKey);
 
-			if (state.status == "debug" && prefix && event.key.toUpperCase() == 'S') {
+			if ((event.ctrlKey || event.metaKey) && event.key.toUpperCase() == 'S' && !prefix) {
+				event.preventDefault();
+				doSave(editorInterface.getText());
+			} else if (state.status == "debug" && prefix && event.key.toUpperCase() == 'S') {
 				event.preventDefault();
 				singleStep();
 			}
@@ -126,6 +131,9 @@ const App: Component = () => {
 					</PaneResize>}
 				</PaneResize>
 			</div>
+			<Show when={showSettings()}>
+				<Settings close={() => setShowSettings(false)} />
+			</Show>
 			<Show when={integratedHelp()}>
 				<IntegratedHelp close={() => setIntegratedHelp(false)} />
 			</Show>

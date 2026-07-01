@@ -4,7 +4,7 @@ import { forceLinting } from "@codemirror/lint";
 import { Compartment, EditorState } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { EditorView, basicSetup } from "codemirror";
-import { Component, createEffect, createMemo, onCleanup, onMount, Show } from "solid-js";
+import { Component, createEffect, createMemo, onCleanup, onMount } from "solid-js";
 import { createAsmLinter } from "./AssemblerErrors";
 import { breakpointGutter } from "./Breakpoint";
 import { Theme } from "./GithubTheme";

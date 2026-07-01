@@ -1,11 +1,11 @@
 import { Component, createSignal, Show } from "solid-js";
-import { prefixStr, setIntegratedHelp, testsuiteName } from "./App";
+import { prefixStr, setIntegratedHelp, setShowSettings, testsuiteName } from "./App";
 import { currentTheme, doChangeTheme } from "./Theme";
 import { continueExecution, nextStep, quitDebug, reverseStep, run, runTestSuite, singleStep, startDebug, state } from "./EmulatorStore";
 import { githubLight } from "./GithubTheme";
 export const [ThemeIcon, setThemeIcon] = createSignal(getDefaultIcon())
 
-// to rebuild font.woff2, download https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,200,0,0&icon_names=arrow_forward,close,dark_mode,folder_open,help,night_sight_auto,play_circle,resume,save,step_into,step_over,stop,sunny,undo
+// to rebuild font.woff2, download https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,200,0,0&icon_names=arrow_forward,close,dark_mode,folder_open,help,night_sight_auto,play_circle,resume,save,settings,step_into,step_over,stop,sunny,undo
 
 export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: string) => void }> = (props) => {
     return (
@@ -30,6 +30,13 @@ export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: s
                         icon={ThemeIcon()}
                         title="Change theme"
                         onClick={() => doChangeTheme(ThemeIcon())}
+                    />
+
+                    <ToolbarBtn
+                        class="theme-bg"
+                        icon="settings"
+                        title="Settings"
+                        onClick={() => setShowSettings(true)}
                     />
 
                     <div class="w-px h-5 theme-separator mx-1"></div>
@@ -113,7 +120,7 @@ export const EditorToolbar: Component<{ textGetter: () => string, setText: (s: s
     );
 };
 
-function doSave(content: string) {
+export function doSave(content: string) {
     const blob = new Blob([content], { type: "text/plain" });
 
     const link = document.createElement("a");

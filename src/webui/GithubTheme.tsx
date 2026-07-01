@@ -92,7 +92,7 @@ const cssTheme = (dark: boolean) => {
     return EditorView.theme({
         "&": {
             color: colors.base5,
-            backgroundColor: colors.base0
+            backgroundColor: "var(--color-base0)"
         },
 
         ".cm-content": {
@@ -102,13 +102,13 @@ const cssTheme = (dark: boolean) => {
             backgroundColor: colors.bgorange2
         },
         ".cm-cursor, .cm-dropCursor": { borderLeftColor: colors.blue },
-        "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: colors.base2 },
-        ".cm-activeLine": {  "background-color": colors.base2+"28" },
-        ".cm-content ::selection .cm-activeLine": { backgroundColor: colors.base3 },
+        "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "var(--color-highlight-high)" },
+        ".cm-activeLine": {  "background-color": "var(--color-highlight-low)" },
+        ".cm-content ::selection .cm-activeLine": { backgroundColor: "var(--color-base3)" },
 
-        ".cm-panels": { backgroundColor: colors.base0, color: colors.base5 },
-        ".cm-panels.cm-panels-top": { borderBottom: "2px solid black" },
-        ".cm-panels.cm-panels-bottom": { borderTop: "2px solid black" },
+        ".cm-panels": { backgroundColor: "var(--color-base1)", color: colors.base5 },
+        ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--color-base2)" },
+        ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--color-base2)" },
 
         ".cm-searchMatch": {
             backgroundColor: "#72a1ff59",
@@ -125,13 +125,13 @@ const cssTheme = (dark: boolean) => {
         },
 
         ".cm-gutters": {
-            backgroundColor: colors.base0,
-            color: colors.base4,
+            backgroundColor: "var(--color-base0)",
+            color: "var(--color-base4)",
             border: "none"
         },
 
         ".cm-activeLineGutter": {
-            backgroundColor: colors.base1
+            backgroundColor: "var(--color-highlight-med)"
         },
 
         ".cm-foldPlaceholder": {
@@ -140,12 +140,12 @@ const cssTheme = (dark: boolean) => {
             color: "#ddd"
         },
         ".cm-textfield": {
-            backgroundColor: colors.base2,
+            backgroundColor: "var(--color-base1a)",
             backgroundImage: "none",
             border: "none",
         },
         ".cm-button": {
-            backgroundColor: colors.base2,
+            backgroundColor: "var(--color-base1a)",
             backgroundImage: "none",
             border: "none",
         },
@@ -165,7 +165,7 @@ const cssTheme = (dark: boolean) => {
             "margin": "5px",
             "height": "20px",
             "border": "none",
-            "background-color": colors.base2,
+            "background-color": "var(--color-base1a)",
             "cursor": "pointer",
         },
 
