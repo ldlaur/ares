@@ -231,7 +231,7 @@ const tabKeymap = keymap.of([{
 
 const cssTheme = EditorView.theme({
     "&": {
-        color: "var(--color-base5)",
+        color: "var(--color-text)",
         backgroundColor: "var(--color-base0)"
     },
 
@@ -246,9 +246,9 @@ const cssTheme = EditorView.theme({
     ".cm-activeLine": { "background-color": "var(--color-editor-activeline)" },
     ".cm-content ::selection .cm-activeLine": { backgroundColor: "var(--color-base3)" },
 
-    ".cm-panels": { backgroundColor: "var(--color-base1)", color: "var(--color-base5)" },
-    ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--color-base2)" },
-    ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--color-base2)" },
+    ".cm-panels": { backgroundColor: "var(--color-base1)", color: "var(--color-base4)" },
+    ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--color-border)" },
+    ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--color-border)" },
 
     ".cm-searchMatch": {
         backgroundColor: "#72a1ff59",
@@ -314,7 +314,7 @@ const cssTheme = EditorView.theme({
     },
 
     ".cm-panel.cm-search input[type=checkbox]:checked": {
-        "background-color": "var(--color-base5)",
+        "background-color": "var(--color-base4)",
     },
 
     ".cm-panel.cm-search input[type=checkbox]:checked:hover": {
@@ -327,7 +327,7 @@ const cssTheme = EditorView.theme({
     },
 
     ".cm-search > button:active": {
-        "background-color": "var(--color-base5)",
+        "background-color": "var(--color-base4)",
         "color": "var(--color-base0)",
         "background-image": "none",
     },
@@ -395,7 +395,7 @@ export const highlightStyle = HighlightStyle.define([
     },
     {
         tag: t.invalid,
-        class: "text-base5"
+        class: "text-base4"
     },
 ]);
 

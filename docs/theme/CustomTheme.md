@@ -1,0 +1,75 @@
+# How to make a custom theme
+
+First things first, grab the [https://github.com/ldlaur/ares/docs/theme/template.json](template), for reference you can follow this list. You can use any kind of format of css color you like. Also, you can put `var(--color-name of another field)` inside your theme, so you don't have to copy and paste a colour.
+- base0
+  - Main editor background color
+  - Gutter (it's the area where all line numbers are) background color
+  - Inverted text color by the class
+  - Scrollbar track color 
+  - Text color of selected search buttons on hover. You can open the search panel by pressing Ctrl + F
+- base1
+  - Background color of all panels except the main one.
+- base1a
+  - Background color of text fields, unchecked checkboxes, buttons in the search panel 
+  - Background color of selected tab in the memory panel
+- base2
+  - Separator
+  - Selected background colour text on the main panel. 
+- base3
+  - Active background colour line inside a selection
+  - Tooltip background
+  - Arrow colour
+  - Hover state for checkboxes
+  - Search buttons
+  - Scrollbar thumb colour
+- base4
+  - Text colour of the gutter
+  - Background colour of active search buttons and active search checkboxes.
+- text
+- testsuite-red 
+  - Background color used for the testsuite when the result is incorrect. You can try a testsuite by adding in the url _?testsuite=nth_.
+- testsuite-green 
+  - Background color used for the testsuite when the result is correct. You can try a testsuite by adding in the url _?testsuite=nth_.
+- editor-selection-match
+  - Background color of all words identical to the selected one. 
+- button-hover
+- button-active
+- editor-activeline
+  - Background color for the selected line in the editor.
+- sp-highlight
+  - Background color for the byte that has the same address of _sp_ in stack tab
+- fp-highlight
+  - Background color for the byte that has the same address of _fp_ in stack tab
+- border
+  - Border colour of buttons on the settings modal
+  - Top and bottom border of panels
+- regtable-special
+  - Text colour for _ra/x1_ and _sp/x2_
+- regtable-temp
+  - Text colour for _t0/x5_, ..., _t6/x31_
+- regtable-arg
+  - Text colour for _a0/x10_, ..., _a7/x17_
+- regtable-saved 
+  - Text colour for _s0/fp/x8_, ..., _s11/x27_
+- pseudoinst
+  - Text colour for all pseudoinstructions like `not`
+- inst
+  - Text colour for all instructions like `or`.
+- addrcolumn
+  - Text colour used for all the address in the `.text` panel.
+- debugging
+  - Background colour for the line that will be executed in debugging mode. You can active it by pressing on the right arrow on the toolbar.
+- editor-caret
+  - Cursor colour on the main area.
+- editor-insn
+  - Text colour of an instruction.
+- editor-reg
+  - Text colour of a register being used in an instruction.
+- editor-const
+  - Text colour of an immediate (number).
+- editor-string
+  - Text colour of a string.
+- editor-directive
+  - Text colour of a directive like `.globl`.
+- editor-comment
+  - Text color of a comment made in the editor.
