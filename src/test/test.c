@@ -400,6 +400,32 @@ void test_parse_directives_str(void) {
     free_runtime(g);
 }
 
+void test_parse_skip_0(void) {
+    assemble_line(".data\nstr: .skip 10");
+    TEST_ASSERT_EQUAL(NULL, g->error);
+    TEST_ASSERT_EQUAL(10, g->data->contents.len);
+    for (int i = 0; i < 10; i++) TEST_ASSERT_EQUAL(0, g->data->contents.buf[i]);
+}
+
+void test_parse_skip_neg_0(void) {
+    assemble_line(".data\nstr: .skip -1");
+    TEST_ASSERT_EQUAL_STRING("Invalid size", g->error);
+}
+
+
+void test_parse_skip_1(void) {
+    assemble_line(".data\nstr: .skip 10, 'A'");
+    TEST_ASSERT_EQUAL(NULL, g->error);
+    TEST_ASSERT_EQUAL(10, g->data->contents.len);
+    for (int i = 0; i < 10; i++) TEST_ASSERT_EQUAL('A', g->data->contents.buf[i]);
+}
+
+void test_parse_skip_neg_2(void) {
+    assemble_line(".data\nstr: .skip 10, 257");
+    TEST_ASSERT_EQUAL_STRING("Out of bounds byte", g->error);
+}
+
+
 void test_unconsumed_str(void) {
     assemble_line(".data\nstr: .ascii");
     TEST_ASSERT_EQUAL_STRING(g->error, "Invalid string");

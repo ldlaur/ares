@@ -2319,6 +2319,28 @@ export void assemble(AresState *g, const char *txt, size_t s,
                     first = false;
                 }
                 continue;
+            } else if (str_eq_case(directive, directive_len, "space") || str_eq_case(directive, directive_len, "skip")) {
+                i32 size;
+                skip_whitespace(p);
+                if (!parse_numeric(p, &size) || size < 0) {
+                    err = "Invalid size";
+                    break;
+                }
+                i32 fill = 0;
+                skip_whitespace(p);
+                if (consume_if(p, ',')) {
+                    skip_whitespace(p);
+                    if (!parse_numeric(p, &fill)) {
+                        err = "Invalid byte";
+                        break;
+                    } 
+                    if (fill < -128 || fill > 255) {
+                        err = "Out of bounds byte";
+                        break;
+                    }
+                }
+                for (u32 i = 0; i < size; i++) asm_emit_byte(g, fill, p->startline);
+                continue;
             } else if (str_eq_case(directive, directive_len, "half")) {
                 i32 value;
                 bool first = true;
