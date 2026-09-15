@@ -8,6 +8,7 @@ This initial release introduces the following core features:
 ### Web UI version:
 - **modern editing experience**:
   - whole-UI light and dark themes
+  - [Custom themes](https://github.com/ldlaur/ares/blob/master/docs/theme/CustomTheme.md)
   - CodeMirror 6-based editor with RV32IMC syntax highlighting
   - live assembler error reporting
 - **debugging tools**:

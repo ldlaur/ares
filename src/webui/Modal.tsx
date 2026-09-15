@@ -38,14 +38,14 @@ export const Modal: Component<{ title: string, close: () => void, children: any 
                     aria-labelledby="modal-title"
                 >
                     <header class="sticky top-0 z-10 flex items-center justify-between pl-4 theme-border border-b bg-base0">
-                        <h2 id="modal-title" class="text-lg font-bold text-base4">
+                        <h2 id="modal-title" class="text-lg font-bold theme-fg">
                             {props.title}
                         </h2>
                         <button
                             onClick={props.close}
                             aria-label="Close modal"
                             type="button"
-                            class="bg-base0 p-2 text-base4 cursor-pointer material-symbols-outlined"
+                            class="bg-base0 p-2 theme-fg cursor-pointer material-symbols-outlined"
                         >
                             {"close"}
                         </button>
