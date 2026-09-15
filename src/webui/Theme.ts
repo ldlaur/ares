@@ -105,11 +105,11 @@ export function getCustomTheme(mode: "light" | "dark") {
 	if (custom !== null && custom !== "") {
 		appendCustomTheme(custom, mode);
 	} else {
-    const saved = localStorage.getItem("theme_" + mode);
-    if (saved === "custom-" + mode) {
-      localStorage.setItem("theme_" + mode, "github-" + mode);
-      setTheme("github-" + mode, mode === "light" ? true : false);
-    }
+		const saved = localStorage.getItem("theme_" + mode);
+		if (saved === "custom-" + mode) {
+			localStorage.setItem("theme_" + mode, "github-" + mode);
+			setTheme("github-" + mode, mode === "light" ? true : false);
+		}
 	}
 }
 

@@ -155,7 +155,7 @@ export const Settings: Component<{ close: () => void }> = (props) => {
                                     for="fileInputLight"
                                     class="font-semibold w-full text-left pb-1 pr-2 pl-2 theme-fg bg-base0 hover:bg-border focus:outline-none cursor-pointer"
                                 >
-                                    Upload
+                                    upload
                                 </label>
                                 <input
                                     id="fileInputLight"
@@ -172,7 +172,7 @@ export const Settings: Component<{ close: () => void }> = (props) => {
                                     for="fileInputDark"
                                     class="font-semibold w-full text-left pb-1 pr-2 pl-2 theme-fg bg-base0 hover:bg-border focus:outline-none cursor-pointer"
                                 >
-                                    Upload
+                                    upload
                                 </label>
                                 <input
                                     id="fileInputDark"
