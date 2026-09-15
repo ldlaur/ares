@@ -62,8 +62,18 @@ const DisasmView: Component<{
         get count() { return addresses().length; },
         getScrollElement: () => props.parentRef ?? null,
         estimateSize: () => props.charHeight,
+        getItemKey: (index) => addresses()[index],
         overscan: 5,
     });
+
+    const virtualRows = createMemo(() =>
+        virtualizer.getVirtualIndexes().map(index => ({
+            index,
+            addr: addresses()[index],
+            start: index * props.charHeight,
+            size: props.charHeight,
+        }))
+    );
 
     createEffect(() => {
         if (props.pc > 0) {
@@ -84,7 +94,7 @@ const DisasmView: Component<{
 
     return (
         <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-            <For each={virtualizer.getVirtualItems()}>
+            <For each={virtualRows()}>
                 {(virtRow) => {
                     const addr = addresses()[virtRow.index];
                     return (
