@@ -70,6 +70,7 @@
   --temp-highlight_med: #403d52;
   --temp-highlight_high: #524f67;
 
+  --color-editor-selection-match: #4c437580;
   --color-editor-activeline: #4c437580;
   --color-breakpoints: var(--temp-love);
   --color-text: var(--temp-text);
@@ -126,6 +127,7 @@
   --temp-highlight_med: #44415a;
   --temp-highlight_high: #56526e;
 
+  --color-editor-selection-match: #44415a80;
   --color-editor-activeline: #44415a80;
   --color-breakpoints: var(--temp-love);
   --color-text: var(--temp-text);
