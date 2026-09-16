@@ -712,6 +712,7 @@ void test_la_vs_pcrel(void) {
     u32 expected_auipc, expected_addi;
     assemble_line(
         "l0: auipc a0, %pcrel_hi(label)\naddi a0, a0, %pcrel_lo(l0)\nlabel:");
+    TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(0x517, LOAD(g, g->text->base, 4, &err));
     TEST_ASSERT_EQUAL_INT(0x00850513, LOAD(g, g->text->base + 4, 4, &err));
 }

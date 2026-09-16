@@ -86,6 +86,11 @@ u32 JALR(u32 rd, u32 rs1, u32 off) { return 0b1100111 | (rd << 7) | (rs1 << 15) 
 
 // clang-format on
 
+static i32 sign_extend_12(u32 x) {
+    x &= 0xfff;
+    return x < 0x800 ? (i32)x : (i32)x - 0x1000;
+}
+
 // compressed instruction
 static inline u16 cbits(u32 val, u32 hi, u32 lo, u32 dst) {
     return (u16)(extr(val, hi, lo) << dst);
@@ -434,9 +439,10 @@ bool parse_numeric(Parser *p, i32 *out) {
                 return false;
             }
             parsed_digit = true;
+            // pre: value <= 4294967295
             value = value * base + digit;
-            // by giving an extremely long number
-            // the user could overflow the i64 too
+            // post: value <= 4294967295*16 + 15.
+            // so, can't overflow the i64
             if (value > 4294967295) {
                 *p = start;
                 return false;
@@ -774,6 +780,7 @@ const char *label(AresState *g, Parser *p, Parser *orig, DeferredInsnCb *cb,
     if (g->in_fixup && (!reloc || !g->allow_externs)) return "Label not found";
     if (g->in_fixup) {
         *out_addr = 0;
+        *later = true;
         return reloc(g, target, target_len);
     }
     DeferredInsn *insn = ARES_ARRAY_PUSH(&g->deferred_insn);
@@ -839,8 +846,8 @@ const char *parse_modifier_hi(AresState *g, Parser *p, Parser orig,
             .dest_addr = addr};
         addr -= g->section->emit_idx + g->section->base;
     }
-    i32 lo = (i32)((u32)addr << 20) >> 20;
-    u32 hi = (u32)(addr - lo) >> 12;
+    i32 lo = sign_extend_12(addr);
+    u32 hi = (addr - (u32)lo) >> 12;
     *simm = hi;
     return NULL;
 }
@@ -905,8 +912,7 @@ const char *parse_modifier_lo(AresState *g, Parser *p, Parser orig, bool is_i,
             }
         }
     }
-    i32 lo = (i32)((u32)addr << 20) >> 20;
-    *simm = lo;
+    *simm = sign_extend_12(addr);
     return NULL;
 }
 
@@ -947,7 +953,8 @@ const char *handle_alu_reg(AresState *g, Parser *p, const char *opcode,
     else if (str_eq_case(opcode, opcode_len, "divu")) inst = DIVU(d, s1, s2);
     else if (str_eq_case(opcode, opcode_len, "rem")) inst = REM(d, s1, s2);
     else if (str_eq_case(opcode, opcode_len, "remu")) inst = REMU(d, s1, s2);
-
+    else if (str_eq_case(opcode, opcode_len, "sgt")) inst = SLT(d, s2, s1);
+    else if (str_eq_case(opcode, opcode_len, "sgtu")) inst = SLTU(d, s2, s1);
     asm_emit(g, inst, p->startline);
     return NULL;
 }
@@ -1195,8 +1202,7 @@ const char *handle_jump(AresState *g, Parser *p, const char *opcode,
 
     skip_trailing(p);
     // jal optionally takes a register argument
-    if (str_eq_case(opcode, opcode_len, "jal") ||
-        str_eq_case(opcode, opcode_len, "call")) {
+    if (str_eq_case(opcode, opcode_len, "jal")) {
         if ((d = parse_reg(p)) == -1) err = "Invalid rd";
         skip_trailing(p);
         if (consume_if(p, ',')) {
@@ -1224,6 +1230,63 @@ const char *handle_jump(AresState *g, Parser *p, const char *opcode,
         return "Jump immediate too large";
     if (simm & 1) return "Jump target must be even";
     asm_emit(g, JAL(d, simm), p->startline);
+    return NULL;
+}
+
+const char *handle_call_tail(AresState *g, Parser *p, const char *opcode,
+                             size_t opcode_len) {
+    Parser orig = *p;
+    bool later;
+
+    Reg rd = REG_RA;
+    Reg scratch = REG_ZERO;
+
+    bool is_call = str_eq_case(opcode, opcode_len, "call");
+
+    if (is_call) {
+        skip_trailing(p);
+        Parser try_reg = *p;
+        int r = parse_reg(&try_reg);
+        if (r >= 0) {
+            skip_trailing(&try_reg);
+            if (consume_if(&try_reg, ',')) {
+                rd = r;
+                *p = try_reg;
+            }
+        }
+    } else {
+        rd = 0;
+        scratch = REG_T1;
+    }
+
+    skip_trailing(p);
+
+    u32 addr;
+    const char *err = label(g, p, &orig, handle_call_tail, opcode, opcode_len,
+                            &addr, &later, reloc_pcrel_hi20lo12i);
+
+    if (err) return err;
+
+    if (later) {
+        asm_emit(g, 0, p->startline);
+        asm_emit(g, 0, p->startline);
+        return NULL;
+    }
+
+    i32 pc = (i32)(g->section->emit_idx + g->section->base);
+    i32 simm = (i32)((u32)addr - (u32)pc);
+
+    i32 lo = sign_extend_12((u32)simm);
+    u32 hi = ((u32)simm - (u32)lo) >> 12;
+
+    if (is_call) {
+        asm_emit(g, AUIPC((u32)rd, hi), p->startline);
+        asm_emit(g, JALR((u32)rd, (u32)rd, lo), p->startline);
+    } else {
+        asm_emit(g, AUIPC((u32)scratch, hi), p->startline);
+        asm_emit(g, JALR(0, (u32)scratch, lo), p->startline);
+    }
+
     return NULL;
 }
 
@@ -1327,9 +1390,8 @@ const char *handle_li(AresState *g, Parser *p, const char *opcode,
     if (simm >= -2048 && simm <= 2047) {
         asm_emit(g, ADDI(d, 0, simm), p->startline);
     } else {
-        u32 lo = simm & 0xFFF;
-        if (lo >= 0x800) lo -= 0x1000;
-        u32 hi = (u32)(simm - lo) >> 12;
+        i32 lo = sign_extend_12((u32)simm);
+        u32 hi = ((u32)simm - (u32)lo) >> 12;
         asm_emit(g, LUI(d, hi), p->startline);
         if (lo != 0) asm_emit(g, ADDI(d, d, lo), p->startline);
     }
@@ -1359,8 +1421,8 @@ const char *handle_la(AresState *g, Parser *p, const char *opcode,
     i32 pc = (i32)(g->section->emit_idx + g->section->base);
     i32 simm = (i32)addr - pc;
 
-    i32 lo = (i32)((u32)simm << 20) >> 20;
-    u32 hi = (u32)(simm - lo) >> 12;
+    i32 lo = sign_extend_12((u32)simm);
+    u32 hi = ((u32)simm - (u32)lo) >> 12;
 
     asm_emit(g, AUIPC(d, hi), p->startline);
     asm_emit(g, ADDI(d, d, lo), p->startline);
@@ -1438,6 +1500,8 @@ const char *handle_csr_imm(AresState *g, Parser *p, const char *opcode,
 
     skip_trailing(p);
     if (!parse_numeric(p, &zimm)) return "Invalid immediate";
+
+    if (zimm < 0 || zimm > 31) return "CSR immediate out of bounds";
 
     u32 inst = 0;
     if (str_eq_case(opcode, opcode_len, "csrrwi")) inst = CSRRWI(d, zimm, csr);
@@ -1772,7 +1836,6 @@ const char *handle_c_addi4spn(AresState *g, Parser *p, const char *opcode,
     skip_trailing(p);
     if (!parse_numeric(p, &simm)) return "Invalid immediate";
     if (simm <= 0 || simm > 1020) return "Out of bounds immediate";
-    if (simm == 0) return "Immediate cannot be 0 for c.addi4spn: reserved";
     if (simm % 4 != 0) return "Immediate must be a multiple of 4";
 
     cd = d - 8;
@@ -1937,8 +2000,9 @@ typedef struct OpcodeHandling {
 OpcodeHandling opcode_types[] = {
     {
         handle_alu_reg,
-        {"add", "slt", "sltu", "and", "or", "xor", "sll", "srl", "sub", "sra",
-         "mul", "mulh", "mulhsu", "mulhu", "div", "divu", "rem", "remu"},
+        {"add", "slt",  "sltu", "and",  "or",   "xor",    "sll",
+         "srl", "sub",  "sra",  "mul",  "mulh", "mulhsu", "mulhu",
+         "div", "divu", "rem",  "remu", "sgt",  "sgtu"},
     },
     {handle_alu_imm,
      {"addi", "slti", "sltiu", "andi", "ori", "xori", "slli", "srli", "srai"}},
@@ -1949,7 +2013,8 @@ OpcodeHandling opcode_types[] = {
       "bleu"}},
     {handle_branch_zero, {"beqz", "bnez", "blez", "bgez", "bltz", "bgtz"}},
     {handle_alu_pseudo, {"mv", "not", "neg", "seqz", "snez", "sltz", "sgtz"}},
-    {handle_jump, {"j", "jal", "call"}},
+    {handle_jump, {"j", "jal"}},
+    {handle_call_tail, {"call", "tail"}},
     {handle_jump_reg, {"jr", "jalr"}},
     {handle_ret, {"ret"}},
     {handle_upper, {"lui", "auipc"}},
@@ -2319,7 +2384,8 @@ export void assemble(AresState *g, const char *txt, size_t s,
                     first = false;
                 }
                 continue;
-            } else if (str_eq_case(directive, directive_len, "space") || str_eq_case(directive, directive_len, "skip")) {
+            } else if (str_eq_case(directive, directive_len, "space") ||
+                       str_eq_case(directive, directive_len, "skip")) {
                 i32 size;
                 skip_whitespace(p);
                 if (!parse_numeric(p, &size) || size < 0) {
@@ -2333,13 +2399,14 @@ export void assemble(AresState *g, const char *txt, size_t s,
                     if (!parse_numeric(p, &fill)) {
                         err = "Invalid byte";
                         break;
-                    } 
+                    }
                     if (fill < -128 || fill > 255) {
                         err = "Out of bounds byte";
                         break;
                     }
                 }
-                for (u32 i = 0; i < size; i++) asm_emit_byte(g, fill, p->startline);
+                for (u32 i = 0; i < size; i++)
+                    asm_emit_byte(g, fill, p->startline);
                 continue;
             } else if (str_eq_case(directive, directive_len, "half")) {
                 i32 value;
@@ -2643,6 +2710,7 @@ void free_runtime(AresState *g) {
 
     ARES_ARRAY_FREE(&g->sections);
     ARES_ARRAY_FREE(&g->labels);
+    ARES_ARRAY_FREE(&g->local_labels);
     ARES_ARRAY_FREE(&g->deferred_insn);
     ARES_ARRAY_FREE(&g->globals);
     ARES_ARRAY_FREE(&g->externs);
