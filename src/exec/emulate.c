@@ -434,7 +434,7 @@ static bool emulate_compressed(AresState *g, u16 inst) {
                 g->pc += 2;
                 return true;
             }
-            g->regs[rd] = (u32)(nzimm << 12);
+            g->regs[rd] = ((u32)nzimm) << 12;
             g->pc += 2;
             g->reg_written = rd;
             callsan_store(g, rd);
@@ -804,7 +804,8 @@ void emulate(AresState *g) {
         else if (funct3 == 0b101 && funct7 == 32) *D = (i32)S1 >> shamt;  // SRA
         else if (funct3 == 0b110 && funct7 == 0) *D = S1 | S2;            // OR
         else if (funct3 == 0b111 && funct7 == 0) *D = S1 & S2;            // AND
-        else if (funct3 == 0b000 && funct7 == 1) *D = (i32)S1 * (i32)S2;  // MUL
+        else if (funct3 == 0b000 && funct7 == 1)
+            *D = (u32)((u32)S1 * (u32)S2);  // MUL
         else if (funct3 == 0b001 && funct7 == 1)
             *D = ((i64)(i32)S1 * (i64)(i32)S2) >> 32;  // MULH
         else if (funct3 == 0b010 && funct7 == 1)
@@ -1519,10 +1520,12 @@ void emulator_enter_kernel(AresState *g) {
 
 void emulator_leave_kernel(AresState *g) { g->privilege_level = PRIV_USER; }
 
+// NOTE: intno must be < 32
 void emulator_interrupt_set_pending(AresState *g, u32 intno) {
     g->csr[CSR_MIP] |= 1u << intno;
 }
 
+// NOTE: intno must be < 32
 void emulator_interrupt_clear_pending(AresState *g, u32 intno) {
     g->csr[CSR_MIP] &= ~(1u << intno);
 }
