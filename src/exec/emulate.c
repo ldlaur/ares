@@ -375,11 +375,17 @@ static bool emulate_compressed(AresState *g, u16 inst) {
             u32 rd = extr(inst, 11, 7);
             i32 nzimm = c_imm6(inst);
             if (rd == 0) {
-                if (nzimm != 0) return false;
+                if (nzimm != 0) {  // HINT
+                    g->pc += 2;
+                    return true;
+                }
                 g->pc += 2;
                 return true;
             }
-            if (nzimm == 0) return false;
+            if (nzimm == 0) {  // HINT
+                g->pc += 2;
+                return true;
+            }
             if (!callsan_can_load(g, rd)) return true;
 
             g->regs[rd] += nzimm;
@@ -398,8 +404,10 @@ static bool emulate_compressed(AresState *g, u16 inst) {
         }
         if (funct3 == 0b010) {  // c.li
             u32 rd = extr(inst, 11, 7);
-            if (rd == 0) return false;
-
+            if (rd == 0) {  // HINT
+                g->pc += 2;
+                return true;
+            }
             g->regs[rd] = c_imm6(inst);
             g->pc += 2;
             g->reg_written = rd;
@@ -421,7 +429,11 @@ static bool emulate_compressed(AresState *g, u16 inst) {
             }
 
             i32 nzimm = c_imm6(inst);
-            if (rd == 0 || nzimm == 0) return false;
+            if (nzimm == 0) return false;
+            if (rd == 0) {  // HINT
+                g->pc += 2;
+                return true;
+            }
             g->regs[rd] = (u32)(nzimm << 12);
             g->pc += 2;
             g->reg_written = rd;
@@ -435,7 +447,11 @@ static bool emulate_compressed(AresState *g, u16 inst) {
             if (funct2 == 0b00 || funct2 == 0b01) {  // c.srli / c.srai
                 if (extr(inst, 12, 12) != 0) return false;
                 u32 shamt = extr(inst, 6, 2);
-                if (shamt == 0) return false;
+                if (shamt == 0) {  // HINT
+                    g->pc += 2;
+                    return true;
+                }
+
                 if (!callsan_can_load(g, rd)) return true;
 
                 if (funct2 == 0b00) g->regs[rd] >>= shamt;
@@ -493,7 +509,10 @@ static bool emulate_compressed(AresState *g, u16 inst) {
             if (extr(inst, 12, 12) != 0) return false;
             u32 rd = extr(inst, 11, 7);
             u32 shamt = extr(inst, 6, 2);
-            if (rd == 0 || shamt == 0) return false;
+            if (rd == 0 || shamt == 0) {  // HINT
+                g->pc += 2;
+                return true;
+            }
             if (!callsan_can_load(g, rd)) return true;
 
             g->regs[rd] <<= shamt;
@@ -519,7 +538,10 @@ static bool emulate_compressed(AresState *g, u16 inst) {
                     g->pc = g->regs[rd] & ~1u;
                     return true;
                 }
-                if (rd == 0) return false;
+                if (rd == 0) {  // HINT
+                    g->pc += 2;
+                    return true;
+                }
                 if (!callsan_can_load(g, rs2)) return true;
 
                 g->regs[rd] = g->regs[rs2];
@@ -528,7 +550,6 @@ static bool emulate_compressed(AresState *g, u16 inst) {
                 callsan_store(g, rd);
                 return true;
             }
-
             if (rs2 == 0) {
                 if (rd == 0) {  // c.ebreak
                     g->got_breakpoint = 1;
@@ -545,8 +566,10 @@ static bool emulate_compressed(AresState *g, u16 inst) {
                 callsan_call(g);
                 return true;
             }
-
-            if (rd == 0) return false;
+            if (rd == 0) {  // HINT
+                g->pc += 2;
+                return true;
+            }
             if (!callsan_can_load(g, rd)) return true;
             if (!callsan_can_load(g, rs2)) return true;
 
@@ -655,7 +678,7 @@ void emulate(AresState *g) {
     }
 
     // JALR
-    if (opcode == 0b1100111) {
+    if (opcode == 0b1100111 && funct3 == 0b000) {
         if (!callsan_can_load(g, rs1)) return;
         callsan_store(g, rd);
         *D = g->pc + 4;
@@ -802,6 +825,12 @@ void emulate(AresState *g) {
         callsan_store(g, rd);
         return;
     }
+
+    if (opcode == 0b0001111) {  // FENCE
+        g->pc += 4;
+        return;
+    }
+
     // SYSTEM instructions
     if (opcode == 0x73) {
         if (funct3 == 0b000 && itype == 0) {
