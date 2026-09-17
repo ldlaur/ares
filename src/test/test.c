@@ -1215,9 +1215,9 @@ _start: addi x0, x0, 0\n\
                                    CAUSE_SUPERVISOR_TIMER & ~CAUSE_INTERRUPT);
     step();
 
-    // delivers interrupt and executes one instruction
+    // delivers interrupt and doesnt execute anything
     TEST_ASSERT_EQUAL(
-        4 + vector_handlers + 4 * (CAUSE_SUPERVISOR_TIMER & ~CAUSE_INTERRUPT),
+        vector_handlers + 4 * (CAUSE_SUPERVISOR_TIMER & ~CAUSE_INTERRUPT),
         g->pc);
 }
 

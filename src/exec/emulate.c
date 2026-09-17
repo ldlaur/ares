@@ -601,6 +601,7 @@ void emulate(AresState *g) {
         if (pending != 0) {
             int intno = __builtin_ctz(pending);
             emulator_deliver_interrupt(g, CAUSE_INTERRUPT | intno);
+            return;
         }
     }
 
