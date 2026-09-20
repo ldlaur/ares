@@ -2,7 +2,6 @@
 
 #include "ares/callsan.h"
 #include "ares/core.h"
-#include "ares/dev.h"
 
 static size_t i32_to_str(i32 val, char buf[12]);
 
@@ -66,73 +65,34 @@ u8 *emulator_get_addr(AresState *g, u32 addr, int size, Section **out_sec) {
 }
 
 u32 LOAD(AresState *g, u32 addr, int size, bool *err) {
-    Section *mem_sec;
-    u8 *mem = emulator_get_addr(g, addr, size, &mem_sec);
-
-    if (!mem_sec || !mem_sec->read ||
-        (mem_sec->super && g->privilege_level == PRIV_USER)) {
-        *err = true;
-        return 0;
-    }
-
-    if (mem_sec->base == MMIO_BASE) {
-        u32 ret = 0;
-        *err = !mmio_read(g, addr - MMIO_BASE, size, &ret);
-        return ret;
-    } else if (!mem) {
-        *err = true;
-        return 0;
-    }
-
-    u32 ret = 0;
-    if (size == 1) {
-        ret = mem[0];
-    } else if (size == 2) {
-        ret = mem[0];
-        ret |= ((u32)mem[1]) << 8;
-    } else if (size == 4) {
-        ret = mem[0];
-        ret |= ((u32)mem[1]) << 8;
-        ret |= ((u32)mem[2]) << 16;
-        ret |= ((u32)mem[3]) << 24;
-    } else assert(!"Invalid size");
-    *err = false;
-    return ret;
+    Section *sec;
+    u8 *mem = emulator_get_addr(g, addr, size, &sec);
+    *err =
+        !mem || !sec->read || (sec->super && g->privilege_level == PRIV_USER);
+    u32 value = 0;
+    if (!*err) ares_buf_read(mem, size, &value);
+    return value;
 }
 
 void STORE(AresState *g, u32 addr, u32 val, int size, bool *err) {
     g->mem_written_len = size;
     g->mem_written_addr = addr;
 
-    Section *mem_sec;
-    u8 *mem = emulator_get_addr(g, addr, size, &mem_sec);
+    Section *sec;
+    u8 *mem = emulator_get_addr(g, addr, size, &sec);
+    *err =
+        !mem || !sec->write || (sec->super && g->privilege_level == PRIV_USER);
+    if (!*err) ares_buf_write(mem, size, val);
+}
 
-    if (!mem_sec || !mem_sec->write ||
-        (mem_sec->super && g->privilege_level == PRIV_USER)) {
-        *err = true;
-        return;
-    }
-
-    if (mem_sec->base == MMIO_BASE) {
-        *err = !mmio_write(g, addr - MMIO_BASE, size, val);
-        return;
-    } else if (!mem) {
-        *err = true;
-        return;
-    }
-
-    if (size == 1) {
-        mem[0] = val;
-    } else if (size == 2) {
-        mem[0] = val;
-        mem[1] = val >> 8;
-    } else if (size == 4) {
-        mem[0] = val;
-        mem[1] = val >> 8;
-        mem[2] = val >> 16;
-        mem[3] = val >> 24;
-    } else assert(!"Invalid size");
-    *err = false;
+static u32 fetch(AresState *g, int size, bool *err) {
+    Section *sec;
+    u8 *mem = emulator_get_addr(g, g->pc, size, &sec);
+    *err = (g->pc & 1) || !mem || !sec->execute ||
+           (sec->super && g->privilege_level == PRIV_USER);
+    u32 inst = 0;
+    if (!*err) ares_buf_read(mem, size, &inst);
+    return inst;
 }
 
 // ebreak only does a breakpoint if the emulator caller knows about it
@@ -605,7 +565,7 @@ void emulate(AresState *g) {
         }
     }
 
-    u32 halfword = LOAD(g, g->pc, 2, &err);
+    u32 halfword = fetch(g, 2, &err);
     if (err) {
         g->runtime_error_params[0] = g->pc;
         g->runtime_error_type = ERROR_FETCH;
@@ -621,7 +581,7 @@ void emulate(AresState *g) {
         return;
     }
 
-    u32 inst = LOAD(g, g->pc, 4, &err);
+    u32 inst = fetch(g, 4, &err);
     if (err) {
         g->runtime_error_params[0] = g->pc;
         g->runtime_error_type = ERROR_FETCH;
