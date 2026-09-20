@@ -1412,14 +1412,9 @@ const char *handle_la(AresState *g, Parser *p, const char *opcode,
     bool later;
     const char *err = label(g, p, &orig, handle_la, opcode, opcode_len, &addr,
                             &later, reloc_pcrel_hi20lo12i);
-    if (later) {
-        asm_emit(g, 0, p->startline);
-        asm_emit(g, 0, p->startline);
-        return NULL;
-    }
     if (err) return err;
     i32 pc = (i32)(g->section->emit_idx + g->section->base);
-    i32 simm = (i32)addr - pc;
+    i32 simm = later ? 0 : (i32)(addr - (u32)pc);
 
     i32 lo = sign_extend_12((u32)simm);
     u32 hi = ((u32)simm - (u32)lo) >> 12;
