@@ -35,7 +35,6 @@ static inline void shadowstack_pop() {}
 #include <stdlib.h>
 #include <string.h>
 
-#define emu_exit() g->exited = true
 #endif
 
 // end is inclusive, like in Verilog
@@ -189,6 +188,7 @@ typedef enum Error : u32 {
     ERROR_PROTECTION = 11,
     ERROR_INVALID_ECALL = 12,
     ERROR_CALLSAN_CALL_CLOBBERED = 13,
+    ERROR_CALLSAN_SP_INVALID = 14,
 } Error;
 
 ARES_ARRAY_TYPE(SectionPtr);

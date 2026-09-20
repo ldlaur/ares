@@ -379,6 +379,9 @@ export class WasmInterface {
           this.textBuffer += "In the RISC-V ABI, a0-a7 and t0-t6 may be overwritten by the called function.\n";
           this.textBuffer += "Hint: S registers are preserved across a call\n";
           break;
+        case 14:
+          this.textBuffer += `CallSan: Stack pointer resides outside the stack region bounds.\n`;
+          break;
         default:
           this.textBuffer += `ERROR${errorType}: ${pcString} ${runtimeParam1.toString(16)}\n`;
           break;

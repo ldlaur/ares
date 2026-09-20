@@ -90,7 +90,7 @@ static bool power_handler(AresState *g, u32 devaddr, u8 *buf, u32 op_size,
     u8 cntl = *buf;
 
     if (POWER_CNTL_SHUTDOWN & cntl) {
-        emu_exit();
+        emulator_exit(g, 0);
     }
 
     // TODO: handle restart

@@ -39,6 +39,15 @@ void callsan_store(AresState *g, int reg) {
     g->reg_bitmap_ever_written |= 1u << reg;
 }
 
+bool callsan_check_sp(AresState *g) {
+    if (!g->callsan_on) return true;
+    u32 sp = g->regs[REG_SP];
+    if (sp >= STACK_TOP - STACK_LEN && sp <= STACK_TOP) return true;
+    g->runtime_error_type = ERROR_CALLSAN_SP_INVALID;
+    g->runtime_error_params[0] = sp;
+    return false;
+}
+
 const u32 CALLSAN_CALL_ACCESSIBLE =
     (1ul << REG_ZERO) | (1ul << REG_SP) | (1ul << REG_RA) | (1ul << REG_TP) |
     (1ul << REG_GP) | (1u << REG_A0) | (1u << REG_A1) | (1u << REG_A2) |
@@ -58,6 +67,7 @@ const u32 CALLSAN_CALL_CLOBBERED =
 
 void callsan_call(AresState *g) {
     if (!g->callsan_on) return;
+    if (!callsan_check_sp(g)) return;
     ShadowStackEnt *e = ARES_ARRAY_PUSH(&g->shadow_stack);
     e->sregs[0] = g->regs[REG_FP];
     e->sregs[1] = g->regs[REG_S1];
@@ -87,6 +97,7 @@ bool callsan_ret(AresState *g) {
         g->runtime_error_params[1] = e->sp;
         return false;
     }
+    if (!callsan_check_sp(g)) return false;
 
     if (g->regs[REG_RA] != e->ra) {
         g->runtime_error_type = ERROR_CALLSAN_RA_MISMATCH;
@@ -122,7 +133,8 @@ bool callsan_ret(AresState *g) {
 
 void callsan_report_store(AresState *g, u32 addr, u32 size, int reg) {
     if (!g->callsan_on) return;
-    bool in_stack = addr >= STACK_TOP - STACK_LEN && addr + size <= STACK_TOP;
+    bool in_stack = addr >= STACK_TOP - STACK_LEN && addr < STACK_TOP &&
+                    size != 0 && size <= STACK_TOP - addr;
     if (!in_stack) return;
     u32 off = addr - (STACK_TOP - STACK_LEN);
     u32 startidx = off / 4;
@@ -133,7 +145,8 @@ void callsan_report_store(AresState *g, u32 addr, u32 size, int reg) {
 
 bool callsan_check_load(AresState *g, u32 addr, u32 size) {
     if (!g->callsan_on) return true;
-    bool in_stack = addr >= STACK_TOP - STACK_LEN && addr + size <= STACK_TOP;
+    bool in_stack = addr >= STACK_TOP - STACK_LEN && addr < STACK_TOP &&
+                    size != 0 && size <= STACK_TOP - addr;
     if (!in_stack) return true;
     u32 off = addr - (STACK_TOP - STACK_LEN);
     u32 startidx = off / 4;

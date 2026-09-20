@@ -77,12 +77,21 @@ static void emulate_safe(bool use_callsan) {
                     "pointer value at pc=0x%08x\n",
                     g->pc);
                 goto err;
-
+            
             case ERROR_CALLSAN_RET_EMPTY:
                 fprintf(
                     stderr,
                     "callsan: attempt to return without a call at pc=0x%08x\n",
                     g->pc);
+                goto err;
+
+            case ERROR_CALLSAN_SP_INVALID:
+                fprintf(stderr,
+                        "callsan: stack pointer in an invalid range: 0x%08x is "
+                        "not in the range "
+                        "0x%08x to 0x%08x at pc=0x%08x\n",
+                        g->runtime_error_params[0], STACK_TOP - STACK_LEN,
+                        STACK_TOP, g->pc);
                 goto err;
 
             case ERROR_CALLSAN_LOAD_STACK:

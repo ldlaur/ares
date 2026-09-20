@@ -1009,6 +1009,21 @@ _start:             \n\
     TEST_ASSERT_EQUAL(g->runtime_error_type, ERROR_NONE);
 }
 
+// make sure that setting sp to very invalid value
+// doesn't completely break callsan
+void test_callsan_invalid_sp(void) {
+    build_and_run(
+        "\
+li sp, 0x1234\n\
+call f       \n\
+li a7, 10    \n\
+ecall        \n\
+f: ret       \n\
+");
+    TEST_ASSERT_EQUAL(g->runtime_error_type, ERROR_CALLSAN_SP_INVALID);
+    TEST_ASSERT_EQUAL(g->runtime_error_params[0], 0x1234);
+}
+
 void test_registers_and_arithmetic(void) {
     build_and_run(
         "\

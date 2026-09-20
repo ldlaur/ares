@@ -47,6 +47,7 @@ u32 LOAD(AresState *g, u32 addr, int size, bool *err);
 void STORE(AresState *g, u32 addr, u32 val, int size, bool *err);
 void emulator_deliver_interrupt(AresState *g, u32 cause);
 void emulator_init(AresState *g);
+void emulator_exit(AresState *g, int code);
 void emulator_interrupt_set_pending(AresState *g, u32 intno);
 void emulator_interrupt_clear_pending(AresState *g, u32 intno);
 size_t disassemble(u32 inst, char *buf, size_t buflen);

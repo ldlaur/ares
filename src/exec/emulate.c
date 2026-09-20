@@ -95,6 +95,14 @@ static u32 fetch(AresState *g, int size, bool *err) {
     return inst;
 }
 
+void emulator_exit(AresState *g, int code) {
+    g->exit_code = code;
+    g->exited = true;
+#ifdef __wasm__
+    emu_exit();
+#endif
+}
+
 // ebreak only does a breakpoint if the emulator caller knows about it
 // otherwise, it does nothing to allow runs to complete
 void do_ebreak(AresState *g) {
@@ -162,7 +170,7 @@ void do_syscall(AresState *g) {
             putchar(((param >> i) & 1) ? '1' : '0');
         }
     } else if (g->regs[17] == 93 || g->regs[17] == 7 || g->regs[17] == 10) {
-        emu_exit();
+        emulator_exit(g, syscall == 93 ? (i32)param : 0);
     } else {
         g->runtime_error_params[0] = g->regs[17];
         g->runtime_error_type = ERROR_INVALID_ECALL;
@@ -364,6 +372,7 @@ static bool emulate_compressed(AresState *g, u16 inst) {
             return true;
         }
         if (funct3 == 0b001) {  // c.jal
+            if (!callsan_check_sp(g)) return true;
             g->regs[REG_RA] = g->pc + 2;
             g->reg_written = REG_RA;
             callsan_store(g, REG_RA);
@@ -526,6 +535,7 @@ static bool emulate_compressed(AresState *g, u16 inst) {
                     return true;
                 }
                 if (!callsan_can_load(g, rd)) return true;
+                if (!callsan_check_sp(g)) return true;
                 u32 target = g->regs[rd] & ~1u;
 
                 g->regs[REG_RA] = g->pc + 2;
@@ -640,6 +650,7 @@ void emulate(AresState *g) {
 
     // JAL
     if (opcode == 0b1101111) {
+        if (rd == REG_RA && !callsan_check_sp(g)) return;
         *D = g->pc + 4;
         g->pc += jtype;
         g->reg_written = rd;
@@ -651,6 +662,7 @@ void emulate(AresState *g) {
     // JALR
     if (opcode == 0b1100111 && funct3 == 0b000) {
         if (!callsan_can_load(g, rs1)) return;
+        if (rd == REG_RA && !callsan_check_sp(g)) return;
         // this has to be checked before updating pc so that the highlighted pc
         // is correct
         if (rd == 0 && rs1 == 1) {  // jr ra/ret
