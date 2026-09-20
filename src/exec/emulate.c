@@ -113,7 +113,15 @@ void do_syscall(AresState *g) {
 
     g->reg_written = 0;
 
-    u32 param = g->regs[10];
+    if (!callsan_can_load(g, REG_A7)) return;
+    u32 syscall = g->regs[REG_A7];
+    // syscall 93 also uses a0, but a lot of out example code
+    // exits with a garbage errcode, so we intentionally not trigger callsan
+    // to avoid breaking that code
+    bool uses_a0 = syscall == 1 || syscall == 4 || syscall == 11 ||
+                   syscall == 34 || syscall == 35;
+    if (uses_a0 && !callsan_can_load(g, REG_A0)) return;
+    u32 param = g->regs[REG_A0];
     if (g->regs[17] == 1) {
         // print int
         char buffer[12];
@@ -265,7 +273,7 @@ static bool c_load_word(AresState *g, u32 rd, u32 rs1, u32 off) {
     if (!callsan_can_load(g, rs1)) return true;
 
     u32 addr = g->regs[rs1] + off;
-    g->regs[rd] = LOAD(g, addr, 4, &err);
+    u32 value = LOAD(g, addr, 4, &err);
     if (err) {
         g->runtime_error_params[0] = addr;
         g->runtime_error_type = ERROR_LOAD;
@@ -278,6 +286,7 @@ static bool c_load_word(AresState *g, u32 rd, u32 rs1, u32 off) {
         return true;
     }
 
+    g->regs[rd] = value;
     g->pc += 2;
     g->reg_written = rd;
     callsan_store(g, rd);
@@ -606,7 +615,8 @@ void emulate(AresState *g) {
 
     u32 S1 = g->regs[rs1];
     u32 S2 = g->regs[rs2];
-    u32 *D = &g->regs[rd];
+    u32 discarded;
+    u32 *D = rd == 0 ? &discarded : &g->regs[rd];
 
     u32 opcode = extr(inst, 6, 0);
 
@@ -641,13 +651,13 @@ void emulate(AresState *g) {
     // JALR
     if (opcode == 0b1100111 && funct3 == 0b000) {
         if (!callsan_can_load(g, rs1)) return;
-        callsan_store(g, rd);
-        *D = g->pc + 4;
         // this has to be checked before updating pc so that the highlighted pc
         // is correct
         if (rd == 0 && rs1 == 1) {  // jr ra/ret
             if (!callsan_ret(g)) return;
         }
+        callsan_store(g, rd);
+        *D = g->pc + 4;
         g->pc = (S1 + itype) & ~1;
         if (rd == 1) callsan_call(g);
         g->reg_written = rd;
@@ -677,11 +687,13 @@ void emulate(AresState *g) {
     if (opcode == 0b0000011) {
         if (!callsan_can_load(g, rs1)) return;
 
-        if (funct3 == 0b000) *D = sext(LOAD(g, S1 + itype, 1, &err), 8);
-        else if (funct3 == 0b001) *D = sext(LOAD(g, S1 + itype, 2, &err), 16);
-        else if (funct3 == 0b010) *D = LOAD(g, S1 + itype, 4, &err);
-        else if (funct3 == 0b100) *D = LOAD(g, S1 + itype, 1, &err);
-        else if (funct3 == 0b101) *D = LOAD(g, S1 + itype, 2, &err);
+        u32 value;
+        if (funct3 == 0b000) value = sext(LOAD(g, S1 + itype, 1, &err), 8);
+        else if (funct3 == 0b001)
+            value = sext(LOAD(g, S1 + itype, 2, &err), 16);
+        else if (funct3 == 0b010) value = LOAD(g, S1 + itype, 4, &err);
+        else if (funct3 == 0b100) value = LOAD(g, S1 + itype, 1, &err);
+        else if (funct3 == 0b101) value = LOAD(g, S1 + itype, 2, &err);
         else {
             g->runtime_error_type = ERROR_UNHANDLED_INSN;
             return;
@@ -697,6 +709,7 @@ void emulate(AresState *g) {
             return;
         }
 
+        *D = value;
         g->pc += 4;
         g->reg_written = rd;
         callsan_store(g, rd);
@@ -819,30 +832,32 @@ void emulate(AresState *g) {
                 do_sret(g);
                 return;
             }
-        } else {                    // all CSR ops
+        } else {  // all CSR ops
+            u32 csr = extr(inst, 31, 20);
+            if (funct3 >= 1 && funct3 <= 3 && !callsan_can_load(g, rs1)) return;
             if (funct3 == 0b001) {  // CSRRW
-                u32 old = rdcsr(g, itype);
-                wrcsr(g, itype, g->regs[rs1]);
-                g->regs[rd] = old;
+                u32 old = rdcsr(g, csr);
+                wrcsr(g, csr, g->regs[rs1]);
+                *D = old;
             } else if (funct3 == 0b010) {  // CSRRS
-                u32 old = rdcsr(g, itype);
-                if (rs1 != 0) wrcsr(g, itype, old | g->regs[rs1]);
-                g->regs[rd] = old;
+                u32 old = rdcsr(g, csr);
+                if (rs1 != 0) wrcsr(g, csr, old | g->regs[rs1]);
+                *D = old;
             } else if (funct3 == 0b011) {  // CSRRC
-                u32 old = rdcsr(g, itype);
-                if (rs1 != 0) wrcsr(g, itype, old & ~g->regs[rs1]);
-                g->regs[rd] = old;
+                u32 old = rdcsr(g, csr);
+                if (rs1 != 0) wrcsr(g, csr, old & ~g->regs[rs1]);
+                *D = old;
             } else if (funct3 == 0b101) {  // CSRRWI
-                g->regs[rd] = rdcsr(g, itype);
-                wrcsr(g, itype, rs1);      // used as imm
+                *D = rdcsr(g, csr);
+                wrcsr(g, csr, rs1);        // used as imm
             } else if (funct3 == 0b110) {  // CSRRSI
-                u32 old = rdcsr(g, itype);
-                if (rs1 != 0) wrcsr(g, itype, old | rs1);
-                g->regs[rd] = old;
+                u32 old = rdcsr(g, csr);
+                if (rs1 != 0) wrcsr(g, csr, old | rs1);
+                *D = old;
             } else if (funct3 == 0b111) {  // CSRRCI
-                u32 old = rdcsr(g, itype);
-                if (rs1 != 0) wrcsr(g, itype, old & ~rs1);
-                g->regs[rd] = old;
+                u32 old = rdcsr(g, csr);
+                if (rs1 != 0) wrcsr(g, csr, old & ~rs1);
+                *D = old;
             } else {
                 goto end;
             }
