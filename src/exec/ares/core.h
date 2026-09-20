@@ -112,7 +112,7 @@ typedef struct {
     u32 offset;
     i32 addend;
     union {
-        Extern *symbol;
+        size_t extern_idx;
         size_t local_label_idx;
     };
     u32 type;

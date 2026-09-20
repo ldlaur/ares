@@ -586,28 +586,43 @@ void asm_emit_16(AresState *g, u32 inst, int linenum) {
     asm_emit_byte(g, inst >> 8, linenum);
 }
 
-static Extern *get_extern(AresState *g, const char *sym, size_t sym_len) {
+static size_t get_extern(AresState *g, const char *sym, size_t sym_len) {
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g->externs); i++) {
         if (ARES_ARRAY_GET(&g->externs, i)->len == sym_len &&
             0 == memcmp(sym, ARES_ARRAY_GET(&g->externs, i)->symbol, sym_len)) {
-            return ARES_ARRAY_GET(&g->externs, i);
+            return i;
         }
     }
 
     Extern *e = ARES_ARRAY_PUSH(&g->externs);
     e->symbol = sym;
     e->len = sym_len;
-    return e;
+    return g->externs.len - 1;
 }
 
 const char *reloc_c_j(AresState *g, const char *sym, size_t sym_len) {
+    size_t extern_idx = get_extern(g, sym, sym_len);
+    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
+    r->extern_idx = extern_idx;
+    r->offset = g->section->emit_idx;
+    r->type = R_RISCV_RVC_JUMP;
+    return NULL;
+}
+
+static const char *reloc_c_branch(AresState *g, const char *sym,
+                                  size_t sym_len) {
+    size_t extern_idx = get_extern(g, sym, sym_len);
+    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
+    r->extern_idx = extern_idx;
+    r->offset = g->section->emit_idx;
+    r->type = R_RISCV_RVC_BRANCH;
     return NULL;
 }
 
 const char *reloc_branch(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_BRANCH;
@@ -615,9 +630,9 @@ const char *reloc_branch(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_jal(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_JAL;
@@ -625,10 +640,10 @@ const char *reloc_jal(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_hi20(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
 
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_HI20;
@@ -636,10 +651,10 @@ const char *reloc_hi20(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_lo12i(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
 
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_LO12_I;
@@ -647,10 +662,10 @@ const char *reloc_lo12i(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_lo12s(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
 
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_LO12_S;
@@ -658,16 +673,16 @@ const char *reloc_lo12s(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_hi20lo12i(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
 
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_HI20;
 
     r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx + 4;
     r->type = R_RISCV_LO12_I;
@@ -675,16 +690,16 @@ const char *reloc_hi20lo12i(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_hi20lo12s(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
 
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_HI20;
 
     r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx + 4;
     r->type = R_RISCV_LO12_S;
@@ -692,10 +707,10 @@ const char *reloc_hi20lo12s(AresState *g, const char *sym, size_t sym_len) {
 }
 
 const char *reloc_abs32(AresState *g, const char *sym, size_t sym_len) {
-    Extern *e = get_extern(g, sym, sym_len);
+    size_t extern_idx = get_extern(g, sym, sym_len);
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
 
-    r->symbol = e;
+    r->extern_idx = extern_idx;
     r->addend = 0;
     r->offset = g->section->emit_idx;
     r->type = R_RISCV_32;
@@ -711,7 +726,7 @@ static const char *reloc_pcrel_hi20lo12i(AresState *g, const char *sym,
 
     Relocation *r_hi = ARES_ARRAY_PUSH(&g->section->relocations);
     r_hi->kind = RELOCATION_KIND_EXTERN;
-    r_hi->symbol = get_extern(g, sym, sym_len);
+    r_hi->extern_idx = get_extern(g, sym, sym_len);
     r_hi->addend = 0;
     r_hi->offset = g->section->emit_idx;
     r_hi->type = R_RISCV_PCREL_HI20;
@@ -730,7 +745,7 @@ static const char *reloc_pcrel_hi20(AresState *g, const char *sym,
                                     size_t sym_len) {
     Relocation *r_hi = ARES_ARRAY_PUSH(&g->section->relocations);
     r_hi->kind = RELOCATION_KIND_EXTERN;
-    r_hi->symbol = get_extern(g, sym, sym_len);
+    r_hi->extern_idx = get_extern(g, sym, sym_len);
     r_hi->addend = 0;
     r_hi->offset = g->section->emit_idx;
     r_hi->type = R_RISCV_PCREL_HI20;
@@ -741,7 +756,7 @@ static const char *reloc_pcrel_lo12i(AresState *g, const char *sym,
                                      size_t sym_len) {
     Relocation *r_lo = ARES_ARRAY_PUSH(&g->section->relocations);
     r_lo->kind = RELOCATION_KIND_EXTERN;
-    r_lo->symbol = get_extern(g, sym, sym_len);
+    r_lo->extern_idx = get_extern(g, sym, sym_len);
     r_lo->addend = 0;
     r_lo->offset = g->section->emit_idx;
     r_lo->type = R_RISCV_PCREL_LO12_I;
@@ -752,7 +767,7 @@ static const char *reloc_pcrel_lo12s(AresState *g, const char *sym,
                                      size_t sym_len) {
     Relocation *r_lo = ARES_ARRAY_PUSH(&g->section->relocations);
     r_lo->kind = RELOCATION_KIND_EXTERN;
-    r_lo->symbol = get_extern(g, sym, sym_len);
+    r_lo->extern_idx = get_extern(g, sym, sym_len);
     r_lo->addend = 0;
     r_lo->offset = g->section->emit_idx;
     r_lo->type = R_RISCV_PCREL_LO12_S;
@@ -888,6 +903,7 @@ const char *parse_modifier_lo(AresState *g, Parser *p, Parser orig, bool is_i,
             if (g->pcrel_hi_relocs.buf[i].label_addr == addr) {
                 addr = g->pcrel_hi_relocs.buf[i].dest_addr - addr;
                 found = true;
+                break;
             }
         }
         if (!found) {
