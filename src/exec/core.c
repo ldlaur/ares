@@ -1130,11 +1130,7 @@ const char *handle_branch(AresState *g, Parser *p, const char *opcode,
         pc_relative_target(g, p, &orig, handle_branch, opcode, opcode_len,
                            &addr, &later, reloc_branch);
     if (err) return err;
-    if (later) {
-        asm_emit(g, 0, p->startline);
-        return NULL;
-    }
-    i32 simm = addr - (g->section->emit_idx + g->section->base);
+    i32 simm = later ? 0 : (addr - (g->section->emit_idx + g->section->base));
     if (simm >= (1 << 12) || simm < -(1 << 12))
         return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
@@ -1171,11 +1167,7 @@ const char *handle_branch_zero(AresState *g, Parser *p, const char *opcode,
         pc_relative_target(g, p, &orig, handle_branch_zero, opcode, opcode_len,
                            &addr, &later, reloc_branch);
     if (err) return err;
-    if (later) {
-        asm_emit(g, 0, p->startline);
-        return NULL;
-    }
-    i32 simm = addr - (g->section->emit_idx + g->section->base);
+    i32 simm = later ? 0 : (addr - (g->section->emit_idx + g->section->base));
     if (simm >= (1 << 12) || simm < -(1 << 12))
         return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
@@ -1237,11 +1229,7 @@ const char *handle_jump(AresState *g, Parser *p, const char *opcode,
     err = pc_relative_target(g, p, &orig, handle_jump, opcode, opcode_len,
                              &addr, &later, reloc_jal);
     if (err) return err;
-    if (later) {
-        asm_emit(g, 0, p->startline);
-        return NULL;
-    }
-    i32 simm = addr - (g->section->emit_idx + g->section->base);
+    i32 simm = later ? 0 : (addr - (g->section->emit_idx + g->section->base));
     if (simm >= (1 << 20) || simm < -(1 << 20))
         return "Jump immediate too large";
     if (simm & 1) return "Jump target must be even";
@@ -1283,14 +1271,8 @@ const char *handle_call_tail(AresState *g, Parser *p, const char *opcode,
 
     if (err) return err;
 
-    if (later) {
-        asm_emit(g, 0, p->startline);
-        asm_emit(g, 0, p->startline);
-        return NULL;
-    }
-
     i32 pc = (i32)(g->section->emit_idx + g->section->base);
-    i32 simm = (i32)((u32)addr - (u32)pc);
+    i32 simm = later ? 0 : (i32)((u32)addr - (u32)pc);
 
     i32 lo = sign_extend_12((u32)simm);
     u32 hi = ((u32)simm - (u32)lo) >> 12;
@@ -1667,12 +1649,8 @@ const char *handle_c_jump(AresState *g, Parser *p, const char *opcode,
     const char *err = pc_relative_target(g, p, &orig, handle_c_jump, opcode,
                                          opcode_len, &addr, &later, reloc_c_j);
     if (err) return err;
-    if (later) {
-        asm_emit_16(g, 0, p->startline);
-        return NULL;
-    }
 
-    i32 simm = addr - (g->section->emit_idx + g->section->base);
+    i32 simm = later ? 0 : (addr - (g->section->emit_idx + g->section->base));
     if (simm >= (1 << 11) || simm < -(1 << 11))
         return "Jump immediate too large";
     if (simm & 1) return "Jump target must be even";
@@ -1722,14 +1700,10 @@ const char *handle_c_branch_zero(AresState *g, Parser *p, const char *opcode,
     skip_trailing(p);
     const char *err =
         pc_relative_target(g, p, &orig, handle_c_branch_zero, opcode,
-                           opcode_len, &addr, &later, reloc_branch);
+                           opcode_len, &addr, &later, reloc_c_branch);
     if (err) return err;
-    if (later) {
-        asm_emit_16(g, 0, p->startline);
-        return NULL;
-    }
 
-    i32 simm = addr - (g->section->emit_idx + g->section->base);
+    i32 simm = later ? 0 : (addr - (g->section->emit_idx + g->section->base));
     if (simm >= 256 || simm < -256) return "Branch immediate too large";
     if (simm & 1) return "Branch target must be even";
 
