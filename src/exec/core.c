@@ -221,8 +221,10 @@ u16 C_EBREAK(void) {
     return inst;
 }
 
+// NOTE: we only support LF line endings! 
+// the caller must convert it before calling assemble()
 bool whitespace(char c) {
-    return c == '\n' || c == '\t' || c == ' ' || c == '\r';
+    return c == '\n' || c == '\t' || c == ' ';
 }
 bool trailing(char c) { return c == '\t' || c == ' '; }
 
@@ -264,17 +266,6 @@ char peek_n(Parser *p, size_t n) {
     if (p->pos + n >= p->size) return '\0';
     return p->input[p->pos + n];
 }
-
-// the difference between the whitespace and trailing functions
-// is that whitespace also includes newlines
-// and as such can be done between tokens in a line
-// for example
-//     li x0,
-//        1234
-// whereas i need the trailing space to end the line gracefully
-// otherwise i would be marking as valid stuff like
-// li x0, 1234li x0, 1234
-
 // Skip a single comment or preprocessor line if present.
 // Returns true if a comment was skipped.
 bool skip_comment(Parser *p) {
@@ -2213,6 +2204,8 @@ const char *parse_word(AresState *g, Parser *p, const char *opcode,
     NOTE: both binutils and RARS do not support instructions spanning more
    lines, like "li a0,\n93" But RARS does support it for .byte etc, so for
    compatibility we do it too
+
+   NOTE: input must be normalized to LF line endings before calling assemble()
 */
 
 export void assemble(AresState *g, const char *txt, size_t s,
