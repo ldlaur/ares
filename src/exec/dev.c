@@ -14,68 +14,50 @@ typedef struct {
     u8 buffer[MMIO_DEVICE_RSV];
 } Device;
 
-typedef struct {
-    u32 dst_addr;
-    u32 src_addr;
-    u32 dst_inc;
-    u32 src_inc;
-    u32 len;
-    u32 trans_size;
-    u32 cntl;
-} PACKED DMAControllerRegisters;
+static u32 device_read_u32(u8 *buf, u32 off) {
+    u32 value = 0;
+    ares_buf_read(buf + off, 4, &value);
+    return value;
+}
 
-typedef struct {
-    char in;
-    char out;
-    u32 in_size;
-    u32 batch_size;
-    u32 cntl;
-} PACKED ConsoleRegisters;
-
-typedef struct {
-    u32 devaddr;
-} PACKED RICRegisters;
+static void device_write_u32(u8 *buf, u32 off, u32 value) {
+    ares_buf_write(buf + off, 4, value);
+}
 
 static Device g_mmio_devices[];
 
 static void ric_send_interrupt(AresState *g, u32 devaddr) {
-    RICRegisters *ric = (void *)g_mmio_devices[6].buffer;
-    ric->devaddr = devaddr;
+    device_write_u32(g_mmio_devices[6].buffer, RIC_REG_DEVADDR, devaddr);
     emulator_interrupt_set_pending(
         g, CAUSE_SUPERVISOR_EXTERNAL & ~CAUSE_INTERRUPT);
 }
 
 static bool dma_handler(AresState *g, u32 devaddr, u8 *buf, u32 op_size,
                         u32 off, int op) {
-    if (MMIO_OP_READ == op) {
-        return true;
-    }
+    if (op == MMIO_OP_READ) return true;
 
-    DMAControllerRegisters *dma = (void *)buf;
+    u32 cntl = device_read_u32(buf, DMA_REG_CNTL);
+    if (!(cntl & DMA_CNTL_DO)) return true;
+    device_write_u32(buf, DMA_REG_CNTL, cntl & ~DMA_CNTL_DO);
 
-    if (!(DMA_CNTL_DO & dma->cntl)) {
-        return true;
-    }
+    // snapshot the request before DMA writes can alter device registers
+    u32 width = device_read_u32(buf, DMA_REG_TRANS_SIZE);
+    u32 len = device_read_u32(buf, DMA_REG_LEN);
+    if (width != 1 && width != 2 && width != 4) return false;
+    if (len % width != 0) return false;
+    u32 dst = device_read_u32(buf, DMA_REG_DST_ADDR);
+    u32 src = device_read_u32(buf, DMA_REG_SRC_ADDR);
+    u32 dst_inc = device_read_u32(buf, DMA_REG_DST_INC);
+    u32 src_inc = device_read_u32(buf, DMA_REG_SRC_INC);
 
-    dma->cntl &= ~DMA_CNTL_DO;
-
-    for (u32 dst_off = 0, src_off = 0, i = 0; i < dma->len;
-         dst_off += dma->dst_inc, src_off += dma->src_inc,
-             i += dma->trans_size) {
-        u32 dst_addr = dma->dst_addr + dst_off;
-        u32 src_addr = dma->src_addr + src_off;
-
-        bool load_err;
-        u32 data = LOAD(g, src_addr, dma->trans_size, &load_err);
-        if (load_err) {
-            return false;
-        }
-
-        bool store_err;
-        STORE(g, dst_addr, data, dma->trans_size, &store_err);
-        if (store_err) {
-            return false;
-        }
+    for (u32 remaining = len / width; remaining != 0; remaining--) {
+        bool err;
+        u32 data = LOAD(g, src, width, &err);
+        if (err) return false;
+        STORE(g, dst, data, width, &err);
+        if (err) return false;
+        dst += dst_inc;
+        src += src_inc;
     }
 
     return true;
@@ -83,15 +65,10 @@ static bool dma_handler(AresState *g, u32 devaddr, u8 *buf, u32 op_size,
 
 static bool power_handler(AresState *g, u32 devaddr, u8 *buf, u32 op_size,
                           u32 off, int op) {
-    if (MMIO_OP_READ == op) {
-        return true;
-    }
+    if (op == MMIO_OP_READ) return true;
 
-    u8 cntl = *buf;
-
-    if (POWER_CNTL_SHUTDOWN & cntl) {
-        emulator_exit(g, 0);
-    }
+    u32 cntl = device_read_u32(buf, POWER_REG_CNTL);
+    if (cntl & POWER_CNTL_SHUTDOWN) emulator_exit(g, 0);
 
     // TODO: handle restart
     return true;
@@ -99,26 +76,19 @@ static bool power_handler(AresState *g, u32 devaddr, u8 *buf, u32 op_size,
 
 static bool console_handler(AresState *g, u32 devaddr, u8 *buf, u32 op_size,
                             u32 off, int op) {
-    ConsoleRegisters *console = (void *)buf;
+    u32 out = device_read_u32(buf, CONSOLE_REG_OUT);
+    if (op == MMIO_OP_WRITE && off == CONSOLE_REG_OUT) putchar(out);
 
-    if (op == MMIO_OP_READ) {
-        if (off == offsetof(ConsoleRegisters, in)) {
-            // how?
-        }
-    } else if (op == MMIO_OP_WRITE) {
-        if (off == offsetof(ConsoleRegisters, out)) {
-            putchar(console->out);
-        }
-    }
-
-    // TODO: this should not be here, this shouild be run when reading input
-    // from the user
-    if (console->cntl & CONSOLE_CNTL_INTERRUPT) {
-        console->in_size++;
-        if (console->in_size >= console->batch_size) {
-            console->in_size = 0;
+    // TODO: this should run when input arrives from the user
+    u32 cntl = device_read_u32(buf, CONSOLE_REG_CNTL);
+    if (cntl & CONSOLE_CNTL_INTERRUPT) {
+        u32 in_size = device_read_u32(buf, CONSOLE_REG_IN_SIZE) + 1;
+        u32 batch_size = device_read_u32(buf, CONSOLE_REG_BATCH_SIZE);
+        if (in_size >= batch_size) {
+            in_size -= batch_size;
             ric_send_interrupt(g, devaddr);
         }
+        device_write_u32(buf, CONSOLE_REG_IN_SIZE, in_size);
     }
 
     return true;
@@ -143,7 +113,9 @@ bool mmio_read(AresState *g, u32 mmio_addr, int size, u32 *ret) {
     u32 dev_num = mmio_addr / MMIO_DEVICE_RSV;
     u32 dev_addr = MMIO_BASE + dev_num * MMIO_DEVICE_RSV;
 
-    if (dev_num > sizeof(g_mmio_devices) / sizeof(Device)) {
+    if (dev_num >= sizeof(g_mmio_devices) / sizeof(Device) ||
+        (size != 1 && size != 2 && size != 4) ||
+        (u32)size > MMIO_DEVICE_RSV - mmio_addr % MMIO_DEVICE_RSV) {
         return false;
     }
 
@@ -157,22 +129,23 @@ bool mmio_read(AresState *g, u32 mmio_addr, int size, u32 *ret) {
         return false;
     }
 
-    return ares_buf_read(buf, size, ret);
+    return ares_buf_read(buf + off, size, ret);
 }
 
 bool mmio_write(AresState *g, u32 mmio_addr, int size, u32 value) {
     u32 dev_num = mmio_addr / MMIO_DEVICE_RSV;
     u32 dev_addr = MMIO_BASE + dev_num * MMIO_DEVICE_RSV;
 
-    if (dev_num > sizeof(g_mmio_devices) / sizeof(Device)) {
+    if (dev_num >= sizeof(g_mmio_devices) / sizeof(Device) ||
+        (size != 1 && size != 2 && size != 4) ||
+        (u32)size > MMIO_DEVICE_RSV - mmio_addr % MMIO_DEVICE_RSV) {
         return false;
     }
+
     Device *dev = &g_mmio_devices[dev_num];
     u8 *buf = dev->buffer;
     u32 off = mmio_addr - (dev_num * MMIO_DEVICE_RSV);
-    if (!ares_buf_write(buf + off, size, value)) {
-        return false;
-    }
+    if (!ares_buf_write(buf + off, size, value)) return false;
 
     return dev->handler(g, dev_addr, buf, size, off, MMIO_OP_WRITE);
 }
