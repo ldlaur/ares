@@ -14,7 +14,8 @@ AresState *g;
 
 // UTILITY FUNCTIONS
 
-static void emulate_safe(bool use_callsan) {
+static int emulate_safe(bool use_callsan) {
+    g->callsan_on = use_callsan;
     while (!g->exited) {
         emulate(g);
 
@@ -26,19 +27,19 @@ static void emulate_safe(bool use_callsan) {
                 fprintf(stderr,
                         "emulator: fetch error at pc=0x%08x on addr=0x%08x\n",
                         g->pc, g->runtime_error_params[0]);
-                return;
+                return EXIT_FAILURE;
 
             case ERROR_LOAD:
                 fprintf(stderr,
                         "emulator: load error at pc=0x%08x on addr=0x%08x\n",
                         g->pc, g->runtime_error_params[0]);
-                return;
+                return EXIT_FAILURE;
 
             case ERROR_STORE:
                 fprintf(stderr,
                         "emulator: store error at pc=0x%08x on addr=0x%08x\n",
                         g->pc, g->runtime_error_params[0]);
-                return;
+                return EXIT_FAILURE;
 
             case ERROR_UNHANDLED_INSN:
                 fprintf(stderr,
@@ -77,7 +78,7 @@ static void emulate_safe(bool use_callsan) {
                     "pointer value at pc=0x%08x\n",
                     g->pc);
                 goto err;
-            
+
             case ERROR_CALLSAN_RET_EMPTY:
                 fprintf(
                     stderr,
@@ -111,14 +112,14 @@ static void emulate_safe(bool use_callsan) {
                 fprintf(stderr, "emulator: unhandled error at pc=0x%08x\n",
                         g->pc);
 
-                return;
+                return EXIT_FAILURE;
         }
     }
 
-    return;
+    return g->exit_code;
 
 err:
-    if (!use_callsan) return;
+    if (!use_callsan) return EXIT_FAILURE;
 
     puts("");
     puts("===================== ARES SANITIZER ERROR");
@@ -131,10 +132,11 @@ err:
             // TODO: size_t can be > INT_MAX though I think no-one will ever
             // write a string longer than 2.1B chars
             fprintf(stderr, "(at %.*s+0x%x", (int)label->len, label->txt, off);
-            size_t line_idx = (ent->pc - TEXT_BASE) / 4;
+            Section *section = label->section;
+            size_t line_idx = ent->pc - section->base;
 
-            if (line_idx < ARES_ARRAY_LEN(&g->text->by_linenum)) {
-                u32 linenum = *ARES_ARRAY_GET(&g->text->by_linenum, line_idx);
+            if (line_idx < ARES_ARRAY_LEN(&section->by_linenum)) {
+                u32 linenum = *ARES_ARRAY_GET(&section->by_linenum, line_idx);
                 fprintf(stderr, ", line %u)", linenum);
             } else {
                 fprintf(stderr, ")");
@@ -151,10 +153,36 @@ err:
         }
         puts("");
     }
+    return EXIT_FAILURE;
+}
+
+static u8 *read_contents(FILE *file, size_t *size, char **error) {
+    if (fseek(file, 0, SEEK_END) != 0) {
+        *error = "could not seek input file";
+        return NULL;
+    }
+    long length = ftell(file);
+    if (length < 0 || (unsigned long)length > UINT32_MAX) {
+        *error = "invalid input file size";
+        return NULL;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        *error = "could not rewind input file";
+        return NULL;
+    }
+    *size = (size_t)length;
+    u8 *contents = malloc(*size ? *size : 1);
+    ares_panic_if_null(contents);
+    if (fread(contents, 1, *size, file) != *size || ferror(file)) {
+        *error = "could not read input file";
+        free(contents);
+        return NULL;
+    }
+    return contents;
 }
 
 static char *assemble_from_file(const char *src_path, bool allow_externs) {
-    FILE *f = fopen(src_path, "r");
+    FILE *f = fopen(src_path, "rb");
 
     if (!f) {
         g->error = "assembler: could not open input file";
@@ -162,13 +190,15 @@ static char *assemble_from_file(const char *src_path, bool allow_externs) {
         return NULL;
     }
 
-    fseek(f, 0, SEEK_END);
-    size_t s = ftell(f);
-    rewind(f);
-    char *text = malloc(s);
-    ares_panic_if_null(text);
-    fread(text, s, 1, f);
+    size_t s;
+    char *error = NULL;
+    char *text = (char *)read_contents(f, &s, &error);
     fclose(f);
+    if (!text) {
+        g->error = error;
+        fprintf(stderr, "assembler: %s\n", error);
+        return NULL;
+    }
 
     assemble(g, text, s, allow_externs);
 
@@ -181,68 +211,54 @@ static char *assemble_from_file(const char *src_path, bool allow_externs) {
 
 // COMMANDS
 
-static void run_elf(const char *elf_path, bool use_callsan) {
+static int run_elf(const char *elf_path, bool use_callsan) {
     FILE *elf = fopen(elf_path, "rb");
     u8 *elf_contents = NULL;
     char *error = NULL;
-
-    if (!elf) {
-        fprintf(stderr, "loader: could not open input file\n");
-        goto exit;
-    }
-
-    fseek(elf, 0, SEEK_END);
-    size_t sz = ftell(elf);
-    if (sz > UINT32_MAX) {
-        error = "file size exceeds the maximum value";
-        goto exit;
-    }
-    rewind(elf);
-
-    elf_contents = malloc(sz);
-    ares_panic_if_null(elf_contents);
-
-    fread(elf_contents, sz, 1, elf);
-
-    ARES_CHECK_CALL(elf_load(g, elf_contents, sz, &error), exit);
-
-    emulate_safe(use_callsan);
-
-exit:
-    if (error) fprintf(stderr, "loader: %s\n", error);
-    if (elf) fclose(elf);
-    free(elf_contents);
-}
-
-static void emulate_from_source(const char *src_path, bool use_callsan) {
-    char *text = assemble_from_file(src_path, false);
-    if (!g->error) emulate_safe(use_callsan);
-    free(text);
-}
-
-static void readelf(const char *elf_path) {
-    FILE *elf = fopen(elf_path, "rb");
-    char *error = NULL;
-    u8 *elf_contents = NULL;
+    int status = EXIT_FAILURE;
 
     if (!elf) {
         error = "could not open input file";
         goto exit;
     }
 
-    fseek(elf, 0, SEEK_END);
-    size_t sz = ftell(elf);
-    if (sz > UINT32_MAX) {
-        error = "file size exceeds maximum value";
+    size_t sz;
+    elf_contents = read_contents(elf, &sz, &error);
+    if (!elf_contents) goto exit;
+
+    ARES_CHECK_CALL(elf_load(g, elf_contents, sz, &error), exit);
+
+    status = emulate_safe(use_callsan);
+
+exit:
+    if (error) fprintf(stderr, "loader: %s\n", error);
+    if (elf) fclose(elf);
+    free(elf_contents);
+    return status;
+}
+
+static int emulate_from_source(const char *src_path, bool use_callsan) {
+    char *text = assemble_from_file(src_path, false);
+    int status = g->error ? EXIT_FAILURE : emulate_safe(use_callsan);
+    free(text);
+    return status;
+}
+
+static int readelf(const char *elf_path) {
+    FILE *elf = fopen(elf_path, "rb");
+    char *error = NULL;
+    u8 *elf_contents = NULL;
+    ReadElfResult readelf = {0};
+
+    if (!elf) {
+        error = "could not open input file";
         goto exit;
     }
-    rewind(elf);
 
-    elf_contents = malloc(sz);
-    ares_panic_if_null(elf_contents);
+    size_t sz;
+    elf_contents = read_contents(elf, &sz, &error);
+    if (!elf_contents) goto exit;
 
-    fread(elf_contents, sz, 1, elf);
-    ReadElfResult readelf = {0};
     ARES_CHECK_CALL(elf_read(elf_contents, sz, &readelf, &error), exit);
 
     printf(" %-35s:", "Magic");
@@ -309,14 +325,15 @@ exit:
     free(elf_contents);
     free(readelf.phdrs);
     free(readelf.shdrs);
+    return error ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
-static void hexdump(const char *file_path) {
+static int hexdump(const char *file_path) {
     FILE *file = fopen(file_path, "rb");
 
     if (!file) {
         fprintf(stderr, "hexdump: could not open file\n");
-        return;
+        return EXIT_FAILURE;
     }
 
     u8 bytes[16];
@@ -335,15 +352,18 @@ static void hexdump(const char *file_path) {
         printf("\n");
         off += bytes_read;
     }
+    bool failed = ferror(file);
+    if (failed) fprintf(stderr, "input file read failed\n");
     fclose(file);
+    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
-static void asciidump(const char *file_path) {
+static int asciidump(const char *file_path) {
     FILE *file = fopen(file_path, "rb");
 
     if (!file) {
         fprintf(stderr, "ascii: could not open file\n");
-        return;
+        return EXIT_FAILURE;
     }
 
     char bytes[16];
@@ -397,7 +417,10 @@ static void asciidump(const char *file_path) {
         printf("\n");
         off += bytes_read;
     }
+    bool failed = ferror(file);
+    if (failed) fprintf(stderr, "input file read failed\n");
     fclose(file);
+    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 void free_runtime_() {
@@ -407,12 +430,13 @@ void free_runtime_() {
 
 int main(int argc, const char *const *const argv) {
     g = calloc(1, sizeof(AresState));
+    ares_panic_if_null(g);
+    atexit(free_runtime_);
     if (argc < 2) {
         fprintf(stderr, "ares: invalid commandline, try 'help'\n");
         return EXIT_FAILURE;
     }
 
-    atexit(free_runtime_);
     const char *const command = argv[1];
 
     if (strcmp(command, "help") == 0) {
@@ -449,24 +473,26 @@ int main(int argc, const char *const *const argv) {
         return EXIT_FAILURE;
     }
 
+    int status = EXIT_SUCCESS;
     // Route to appropriate function
     if (strcmp(command, "check") == 0) {
         char *text = assemble_from_file(file_path, false);
+        status = g->error ? EXIT_FAILURE : EXIT_SUCCESS;
         free(text);
     } else if (strcmp(command, "emulate") == 0) {
-        emulate_from_source(file_path, use_callsan);
+        status = emulate_from_source(file_path, use_callsan);
     } else if (strcmp(command, "runelf") == 0) {
-        run_elf(file_path, use_callsan);
+        status = run_elf(file_path, use_callsan);
     } else if (strcmp(command, "readelf") == 0) {
-        readelf(file_path);
+        status = readelf(file_path);
     } else if (strcmp(command, "hexdump") == 0) {
-        hexdump(file_path);
+        status = hexdump(file_path);
     } else if (strcmp(command, "asciidump") == 0) {
-        asciidump(file_path);
+        status = asciidump(file_path);
     } else {
         fprintf(stderr, "ares: unknown command '%s'\n", command);
         return EXIT_FAILURE;
     }
 
-    return EXIT_SUCCESS;
+    return status;
 }
