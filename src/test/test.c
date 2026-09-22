@@ -1104,6 +1104,16 @@ void test_load_store_api(void) {
     TEST_ASSERT_EQUAL_UINT32(0xDEADBEEFu, val);
 }
 
+void test_kernel_entry_error(void) {
+    const char *prog =
+        "\
+.globl _kernel_start\n\
+_kernel_start:      \n\
+";
+    assemble(g, prog, strlen(prog), false);
+    TEST_ASSERT_EQUAL_STRING(g->error, "_kernel_start not in .kernel_text section");
+}
+
 void test_kernel_memory_protection(void) {
     const char *prog = ".section .kernel_data\nvar: .word 0xCAFEBABE";
     assemble(g, prog, strlen(prog), false);

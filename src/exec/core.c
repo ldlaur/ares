@@ -221,11 +221,9 @@ u16 C_EBREAK(void) {
     return inst;
 }
 
-// NOTE: we only support LF line endings! 
+// NOTE: we only support LF line endings!
 // the caller must convert it before calling assemble()
-bool whitespace(char c) {
-    return c == '\n' || c == '\t' || c == ' ';
-}
+bool whitespace(char c) { return c == '\n' || c == '\t' || c == ' '; }
 bool trailing(char c) { return c == '\t' || c == ' '; }
 
 bool digit(char c) { return (c >= '0' && c <= '9'); }
@@ -2063,8 +2061,14 @@ const char *resolve_kernel_start(AresState *g, u32 *start_pc) {
 
     return NULL;
 }
+
 const char *resolve_entry(AresState *g, u32 *start_pc) {
-    if (resolve_kernel_start(g, start_pc) == NULL) {
+    u32 kernel_start;
+    Section *sec;
+    if (resolve_symbol(g, "_kernel_start", strlen("_kernel_start"), false,
+                       &kernel_start, &sec)) {
+        const char *err = resolve_kernel_start(g, start_pc);
+        if (err) return err;
         emulator_enter_kernel(g);
         return NULL;
     }
