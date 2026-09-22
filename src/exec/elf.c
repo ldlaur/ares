@@ -12,6 +12,7 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
 #include <stdlib.h>
 #include <string.h>
 
+#include "ares/callsan.h"
 #include "ares/core.h"
 #include "ares/emulate.h"
 #include "ares/util.h"
@@ -455,6 +456,7 @@ bool elf_load(AresState *g, u8 *elf_contents, u32 elf_len, char **out_error) {
 
 exit:
     emulator_init(g);
+    callsan_init(g);
     // NOTE: ARES does not generate native code, it runs instructions in an
     // emulation loop, and thus checks memory accesses when they happen. g_pc
     // can thus be assigned any value here
