@@ -191,6 +191,32 @@ void test_sw_immediate_out_of_range(void) {
     TEST_ASSERT_EQUAL_STRING(g->error, "Out of bounds immediate");
 }
 
+void test_comment_nospace(void) {
+    assemble_line("add x0, x0, x0//test");
+    TEST_ASSERT_NULL(g->error);
+    free_runtime(g);
+
+    assemble_line("add x0, x0, x0#test");
+    TEST_ASSERT_NULL(g->error);
+    free_runtime(g);
+
+    assemble_line("addi x0, x0, 0//test");
+    TEST_ASSERT_NULL(g->error);
+    free_runtime(g);
+
+    assemble_line("addi x0, x0, 0#test");
+    TEST_ASSERT_NULL(g->error);
+    free_runtime(g);
+
+    assemble_line("ecall//test");
+    TEST_ASSERT_NULL(g->error);
+    free_runtime(g);
+
+    assemble_line("label: j label//test");
+    TEST_ASSERT_NULL(g->error);
+    free_runtime(g);
+}
+
 void test_sw_immediate_negative(void) {
     bool err;
     assemble_line("sw x1, -1(x2)");
@@ -1111,7 +1137,8 @@ void test_kernel_entry_error(void) {
 _kernel_start:      \n\
 ";
     assemble(g, prog, strlen(prog), false);
-    TEST_ASSERT_EQUAL_STRING(g->error, "_kernel_start not in .kernel_text section");
+    TEST_ASSERT_EQUAL_STRING(g->error,
+                             "_kernel_start not in .kernel_text section");
 }
 
 void test_kernel_memory_protection(void) {

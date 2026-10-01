@@ -422,6 +422,9 @@ bool parse_numeric(Parser *p, i32 *out) {
             else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
             if (digit >= base) {
                 if (whitespace(c)) break;
+                if (c == '#' ||
+                    (c == '/' && (peek_n(p, 1) == '/' || peek_n(p, 1) == '*')))
+                    break;
                 if (c == ' ' || c == '(' || c == ')' || c == ',' || c == '\0')
                     break;
                 *p = start;
