@@ -215,6 +215,7 @@ void free_runtime(AresState *g);
 u32 LOAD(AresState *g, u32 addr, int size, bool *err);
 bool pc_to_label_r(AresState *g, u32 pc, LabelData **ret, u32 *off);
 void get_addr_from_line_r(AresState *g, u32 line, u32 *start, u32 *end);
+void convert_endings(char *file, size_t *len);
 
 typedef enum Reg {
     REG_ZERO = 0,

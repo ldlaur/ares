@@ -691,6 +691,23 @@ addi x0, x0, 3 \n\
     TEST_ASSERT_EQUAL_INT(g->text->by_linenum.len, 3 * 4);
 }
 
+// calling conversion manually since it's only hooked to the file path
+void test_linenum_crlf(void) {
+    char* str = strdup("\
+addi x0, x0, 1 \n\
+addi x0, x0, 2 \n\
+               \n\
+addi x0, x0, 3 \n\
+");
+    size_t len = strlen(str);
+    convert_endings(str, &len);
+    assemble_line(str);
+    TEST_ASSERT_EQUAL_INT(g->text->by_linenum.buf[0], 1);
+    TEST_ASSERT_EQUAL_INT(g->text->by_linenum.buf[1 * 4], 2);
+    TEST_ASSERT_EQUAL_INT(g->text->by_linenum.buf[2 * 4], 4);
+    TEST_ASSERT_EQUAL_INT(g->text->by_linenum.len, 3 * 4);
+}
+
 void test_linenum_2(void) {
     assemble_line(
         "\

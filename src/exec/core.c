@@ -2702,3 +2702,16 @@ void free_runtime(AresState *g) {
     ARES_ARRAY_FREE(&g->pcrel_hi_relocs);
     ARES_ARRAY_FREE(&g->shadow_stack);
 }
+
+void convert_endings(char *file, size_t *len) {
+    size_t read = 0, write = 0;
+    while (read < *len) {
+        if (read + 1 < *len && file[read] == '\r' && file[read + 1] == '\n') {
+            file[write++] = '\n';
+            read += 2;
+        } else {
+            file[write++] = file[read++];
+        }
+    }
+    *len = write;
+}

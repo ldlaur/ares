@@ -199,7 +199,7 @@ static char *assemble_from_file(const char *src_path, bool allow_externs) {
         fprintf(stderr, "assembler: %s\n", error);
         return NULL;
     }
-
+    convert_endings(text, &s);
     assemble(g, text, s, allow_externs);
 
     if (g->error) {
