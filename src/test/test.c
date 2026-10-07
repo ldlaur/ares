@@ -141,8 +141,12 @@ void test_parse_quoted_str_invalid_escape(void) {
     TEST_ASSERT_FALSE(ok);
 }
 
-void assemble_line(const char *line) { assemble(g, line, strlen(line), false); }
-void assemble_line_externs(const char *line) {
+void assemble_line(const char *line) {
+    assemble(g, line, strlen(line), false);
+    TEST_ASSERT_EQUAL_INT(0, g->text->relocations.len);
+    TEST_ASSERT_EQUAL_INT(0, g->data->relocations.len);
+}
+void assemble_line_object(const char *line) {
     assemble(g, line, strlen(line), true);
 }
 
@@ -376,6 +380,23 @@ void test_data_label_1(void) {
     TEST_ASSERT_EQUAL(TEXT_BASE, LOAD(g, g->data->base, 4, &err));
 }
 
+void test_data_label_reloc(void) {
+    assemble_line_object(".data\nhi: .word label\n.text\nlabel:\nnop");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(1, g->data->relocations.len);
+    TEST_ASSERT_EQUAL_INT(0, g->data->relocations.buf[0].addend);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL,
+                          g->data->relocations.buf[0].kind);
+    TEST_ASSERT_EQUAL_STR("label", g->data->relocations.buf[0].sym,
+                          g->data->relocations.buf[0].sym_len);
+}
+
+void test_text_label_reloc(void) {
+    assemble_line_object(".text\nhi: la t0, label\n.data\nlabel:\n.word 1234");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
+}
+
 void test_data_label_2(void) {
     bool err = false;
     assemble_line(".text\nlabel:\nnop\n.data\nhi: .word label\n");
@@ -383,7 +404,6 @@ void test_data_label_2(void) {
 }
 
 void test_data_label_3(void) {
-    bool err = false;
     assemble_line(".text\nlabel:\nnop\n.data\nhi: .word labelNotFound\n");
     TEST_ASSERT_EQUAL_STRING(g->error, "Invalid word");
 }
@@ -693,7 +713,8 @@ addi x0, x0, 3 \n\
 
 // calling conversion manually since it's only hooked to the file path
 void test_linenum_crlf(void) {
-    char* str = strdup("\
+    char *str = strdup(
+        "\
 addi x0, x0, 1 \n\
 addi x0, x0, 2 \n\
                \n\
@@ -706,6 +727,7 @@ addi x0, x0, 3 \n\
     TEST_ASSERT_EQUAL_INT(g->text->by_linenum.buf[1 * 4], 2);
     TEST_ASSERT_EQUAL_INT(g->text->by_linenum.buf[2 * 4], 4);
     TEST_ASSERT_EQUAL_INT(g->text->by_linenum.len, 3 * 4);
+    free(str);
 }
 
 void test_linenum_2(void) {
@@ -731,13 +753,25 @@ void test_hi_lo_int(void) {
     bool err;
     u32 expected_lui, expected_addi;
     assemble_line("li a0, 123456\n");
+    TEST_ASSERT_NULL(g->error);
     expected_lui = LOAD(g, g->text->base, 4, &err);
     expected_addi = LOAD(g, g->text->base + 4, 4, &err);
     free_runtime(g);
     g->error = NULL;
     assemble_line("lui a0, %hi(123456)\naddi a0, a0, %lo(123456)\n");
+    TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(expected_lui, LOAD(g, g->text->base, 4, &err));
     TEST_ASSERT_EQUAL_INT(expected_addi, LOAD(g, g->text->base + 4, 4, &err));
+}
+
+void test_hi_lo_int_2(void) {
+    assemble_line("lui a0, %hi(123456)\naddi a0, a0, %lo(123456)\n");
+    TEST_ASSERT_NULL(g->error);
+}
+
+void test_hi_lo_int_3(void) {
+    assemble_line("lui t0, %hi(1)\nlui t1, %hi(2)\n");
+    TEST_ASSERT_NULL(g->error);
 }
 
 void test_hi_lo_label(void) {
@@ -754,12 +788,67 @@ void test_hi_lo_label(void) {
 
 void test_la_vs_pcrel(void) {
     bool err;
-    u32 expected_auipc, expected_addi;
     assemble_line(
         "l0: auipc a0, %pcrel_hi(label)\naddi a0, a0, %pcrel_lo(l0)\nlabel:");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(0x517, LOAD(g, g->text->base, 4, &err));
     TEST_ASSERT_EQUAL_INT(0x00850513, LOAD(g, g->text->base + 4, 4, &err));
+}
+
+void test_pcrel_call(void) {
+    bool err;
+    assemble_line("call sym\nsym:");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(0x97, LOAD(g, g->text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(0x8080e7, LOAD(g, g->text->base + 4, 4, &err));
+
+    free_runtime(g);
+    assemble_line(
+        "L: auipc ra, %pcrel_hi(sym)\njalr ra, %pcrel_lo(L)(ra)\nsym:");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(0x97, LOAD(g, g->text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(0x8080e7, LOAD(g, g->text->base + 4, 4, &err));
+
+    free_runtime(g);
+    assemble_line(
+        "L: auipc ra, %pcrel_hi(sym)\njalr ra, ra, %pcrel_lo(L)\nsym:");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(0x97, LOAD(g, g->text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(0x8080e7, LOAD(g, g->text->base + 4, 4, &err));
+}
+
+void test_pcrel_imm_big(void) {
+    bool err;
+    assemble_line(
+        "l0: auipc a0, %pcrel_hi(0x00400008)\naddi a0, a0, %pcrel_lo(l0)");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(0x517, LOAD(g, g->text->base, 4, &err));
+    TEST_ASSERT_EQUAL_INT(0x00850513, LOAD(g, g->text->base + 4, 4, &err));
+}
+
+// i have checked that clang and gcc accept this behavior
+void test_pcrel_weird(void) {
+    assemble_line_object("l0: la a0, externalsym\naddi a0, a0, %pcrel_lo(l0)");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(3, g->text->relocations.len);
+}
+
+void test_pcrel_local_target_other_section(void) {
+    assemble_line(
+        ".text\n"
+        "l0: auipc a0, %pcrel_hi(target)\n"
+        "addi a0, a0, %pcrel_lo(l0)\n"
+        ".data\n"
+        "target:\n"
+        ".word 0\n");
+    TEST_ASSERT_NULL(g->error);
+}
+
+void test_pcrel_hi_imm(void) {
+    assemble_line(
+        ".text\n"
+        "l0: auipc a0, %pcrel_hi(0x12345)\n");
+    TEST_ASSERT_NULL(g->error);
 }
 
 // -- runtime tests
@@ -1520,142 +1609,149 @@ fun:                   \n\
     TEST_ASSERT_EQUAL_UINT32(1, g->regs[REG_A0]);
 }
 
-static void assert_extern(size_t idx, const char *name) {
-    TEST_ASSERT_TRUE(idx < g->externs.len);
-    TEST_ASSERT_EQUAL_INT(strlen(name), g->externs.buf[idx].len);
-    TEST_ASSERT_EQUAL_INT(
-        0, memcmp(name, g->externs.buf[idx].symbol, strlen(name)));
-}
-
 void test_reloc_jal_external(void) {
-    assemble_line_externs("j external\n");
+    assemble_line_object("j external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_JAL, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
     TEST_ASSERT_EQUAL_INT(0, r->addend);
-    assert_extern(r->extern_idx, "external");
-    TEST_ASSERT_EQUAL_INT(1, g->externs.len);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
     bool err = false;
     TEST_ASSERT_EQUAL_INT(0x6f, LOAD(g, g->text->base, 4, &err));  // j 0
 }
 
 void test_reloc_jal_offset(void) {
-    assemble_line_externs("nop\nj external\n");
+    assemble_line_object("nop\nj external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_JAL, r->type);
     TEST_ASSERT_EQUAL_INT(4, r->offset);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_jal_rd_form(void) {
-    assemble_line_externs("jal x5, external\n");
+    assemble_line_object("jal x5, external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_JAL, r->type);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_branch_external(void) {
-    assemble_line_externs("beq a0, a1, external\n");
+    assemble_line_object("beq a0, a1, external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_BRANCH, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
     TEST_ASSERT_EQUAL_INT(0, r->addend);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_branch_zero_external(void) {
-    assemble_line_externs("beqz a0, external\n");
+    assemble_line_object("beqz a0, external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_BRANCH, r->type);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_c_j_external(void) {
-    assemble_line_externs("c.j external\n");
+    assemble_line_object("c.j external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
+    TEST_ASSERT_EQUAL_INT(2, g->text->contents.len);
     TEST_ASSERT_EQUAL_INT(R_RISCV_RVC_JUMP, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
-    TEST_ASSERT_EQUAL_INT(2, g->text->contents.len);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_c_jal_external(void) {
-    assemble_line_externs("c.jal external\n");
+    assemble_line_object("c.jal external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     TEST_ASSERT_EQUAL_INT(R_RISCV_RVC_JUMP, g->text->relocations.buf[0].type);
+    Relocation *r = &g->text->relocations.buf[0];
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_c_branch_external(void) {
-    assemble_line_externs("c.beqz a0, external\n");
+    assemble_line_object("c.beqz a0, external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
+    TEST_ASSERT_EQUAL_INT(2, g->text->contents.len);
     TEST_ASSERT_EQUAL_INT(R_RISCV_RVC_BRANCH, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
-    TEST_ASSERT_EQUAL_INT(2, g->text->contents.len);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_c_bnez_external(void) {
-    assemble_line_externs("c.bnez a0, external\n");
+    assemble_line_object("c.bnez a0, external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     TEST_ASSERT_EQUAL_INT(R_RISCV_RVC_BRANCH, g->text->relocations.buf[0].type);
+    Relocation *r = &g->text->relocations.buf[0];
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_hi20_external(void) {
-    assemble_line_externs("lui a0, %hi(external)\n");
+    assemble_line_object("lui a0, %hi(external)\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_HI20, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
     TEST_ASSERT_EQUAL_INT(0, r->addend);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_lo12i_external(void) {
-    assemble_line_externs("addi a0, a0, %lo(external)\n");
+    assemble_line_object("addi a0, a0, %lo(external)\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_LO12_I, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
+    // assert_extern(r->extern_idx, "external");
 }
 
 void test_reloc_lo12i_load_external(void) {
-    assemble_line_externs("lw a0, %lo(external)(a1)\n");
+    assemble_line_object("lw a0, %lo(external)(a1)\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     TEST_ASSERT_EQUAL_INT(R_RISCV_LO12_I, g->text->relocations.buf[0].type);
 }
 
 void test_reloc_lo12s_external(void) {
-    assemble_line_externs("sw a0, %lo(external)(a1)\n");
+    assemble_line_object("sw a0, %lo(external)(a1)\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_LO12_S, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_hi_lo_pair_external(void) {
-    assemble_line_externs(
+    assemble_line_object(
         "lui a0, %hi(external)\n"
         "addi a0, a0, %lo(external)\n");
     TEST_ASSERT_NULL(g->error);
@@ -1664,41 +1760,46 @@ void test_reloc_hi_lo_pair_external(void) {
     TEST_ASSERT_EQUAL_INT(0, g->text->relocations.buf[0].offset);
     TEST_ASSERT_EQUAL_INT(R_RISCV_LO12_I, g->text->relocations.buf[1].type);
     TEST_ASSERT_EQUAL_INT(4, g->text->relocations.buf[1].offset);
-    // both refer to the same extern
-    TEST_ASSERT_EQUAL_INT(g->text->relocations.buf[0].extern_idx,
-                          g->text->relocations.buf[1].extern_idx);
-    TEST_ASSERT_EQUAL_INT(1, g->externs.len);
 }
 
 void test_reloc_abs32_external(void) {
-    assemble_line_externs(".data\n.word external\n");
+    assemble_line_object(".data\n.word external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->data->relocations.len);
     Relocation *r = &g->data->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_32, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
     TEST_ASSERT_EQUAL_INT(0, r->addend);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
     TEST_ASSERT_EQUAL_INT(4, g->data->contents.len);
     bool err = false;
     TEST_ASSERT_EQUAL_INT(0, LOAD(g, g->data->base, 4, &err));
 }
 
 void test_reloc_abs32_list_external(void) {
-    assemble_line_externs(".data\n.word ext1, ext2, ext3\n");
+    assemble_line_object(".data\n.word ext1, ext2, ext3\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(3, g->data->relocations.len);
     TEST_ASSERT_EQUAL_INT(0, g->data->relocations.buf[0].offset);
     TEST_ASSERT_EQUAL_INT(4, g->data->relocations.buf[1].offset);
     TEST_ASSERT_EQUAL_INT(8, g->data->relocations.buf[2].offset);
-    TEST_ASSERT_EQUAL_INT(3, g->externs.len);
-    assert_extern(g->data->relocations.buf[0].extern_idx, "ext1");
-    assert_extern(g->data->relocations.buf[1].extern_idx, "ext2");
-    assert_extern(g->data->relocations.buf[2].extern_idx, "ext3");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL,
+                          g->data->relocations.buf[0].kind);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL,
+                          g->data->relocations.buf[1].kind);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL,
+                          g->data->relocations.buf[2].kind);
+    TEST_ASSERT_EQUAL_STR("ext1", g->data->relocations.buf[0].sym,
+                          g->data->relocations.buf[0].sym_len);
+    TEST_ASSERT_EQUAL_STR("ext2", g->data->relocations.buf[1].sym,
+                          g->data->relocations.buf[1].sym_len);
+    TEST_ASSERT_EQUAL_STR("ext3", g->data->relocations.buf[2].sym,
+                          g->data->relocations.buf[2].sym_len);
 }
 
 void test_reloc_abs32_mixed_numbers_and_labels(void) {
-    assemble_line_externs(".data\n.word 1, external, 3\n");
+    assemble_line_object(".data\n.word 1, external, 3\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->data->relocations.len);
     TEST_ASSERT_EQUAL_INT(4, g->data->relocations.buf[0].offset);
@@ -1709,38 +1810,32 @@ void test_reloc_abs32_mixed_numbers_and_labels(void) {
 }
 
 void test_reloc_pcrel_hi20_external(void) {
-    assemble_line_externs("auipc a0, %pcrel_hi(external)\n");
+    assemble_line_object("auipc a0, %pcrel_hi(external)\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     Relocation *r = &g->text->relocations.buf[0];
     TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_HI20, r->type);
     TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r->kind);
+    TEST_ASSERT_EQUAL_STR("external", r->sym, r->sym_len);
 }
 
 void test_reloc_pcrel_lo12i_external(void) {
-    assemble_line_externs("addi a0, a0, %pcrel_lo(external)\n");
-    TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
-    Relocation *r = &g->text->relocations.buf[0];
-    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_I, r->type);
-    TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
+    assemble_line_object("addi a0, a0, %pcrel_lo(external)\n");
+    TEST_ASSERT_EQUAL_STRING("Corresponding hi label is not in this file",
+                             g->error);
 }
 
 void test_reloc_pcrel_lo12s_external(void) {
-    assemble_line_externs("sw a0, %pcrel_lo(external)(a1)\n");
-    TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
-    Relocation *r = &g->text->relocations.buf[0];
-    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_S, r->type);
-    TEST_ASSERT_EQUAL_INT(0, r->offset);
-    assert_extern(r->extern_idx, "external");
+    assemble_line_object("sw a0, %pcrel_lo(external)(a1)\n");
+    TEST_ASSERT_EQUAL_STRING("Corresponding hi label is not in this file",
+                             g->error);
 }
 
 void test_reloc_la_external(void) {
-    assemble_line_externs("la a0, external\n");
+    assemble_line_object("la a0, external\n");
     TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(8, g->text->contents.len);
     TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
     Relocation *r0 = &g->text->relocations.buf[0];
     Relocation *r1 = &g->text->relocations.buf[1];
@@ -1748,9 +1843,11 @@ void test_reloc_la_external(void) {
     TEST_ASSERT_EQUAL_INT(0, r0->offset);
     TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_I, r1->type);
     TEST_ASSERT_EQUAL_INT(4, r1->offset);
-    assert_extern(r0->extern_idx, "external");
-    assert_extern(r1->extern_idx, "external");
-    TEST_ASSERT_EQUAL_INT(8, g->text->contents.len);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, r0->kind);
+    TEST_ASSERT_EQUAL_STR("external", r0->sym, r0->sym_len);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_TEMP, r1->kind);
+    TEST_ASSERT_NULL(r1->sym);
+    TEST_ASSERT_EQUAL(0, r1->sym_len);
     // two zero placeholders
     bool err = false;
     TEST_ASSERT_EQUAL_INT(0x00000517,
@@ -1760,12 +1857,10 @@ void test_reloc_la_external(void) {
 }
 
 void test_reloc_call_external(void) {
-    assemble_line_externs("call external\n");
+    assemble_line_object("call external\n");
     TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_HI20, g->text->relocations.buf[0].type);
-    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_I,
-                          g->text->relocations.buf[1].type);
+    TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
+    TEST_ASSERT_EQUAL_INT(R_RISCV_CALL_PLT, g->text->relocations.buf[0].type);
     TEST_ASSERT_EQUAL_INT(8, g->text->contents.len);
     bool err = false;
     TEST_ASSERT_EQUAL_INT(0x00000097,
@@ -1775,12 +1870,10 @@ void test_reloc_call_external(void) {
 }
 
 void test_reloc_tail_external(void) {
-    assemble_line_externs("tail external\n");
+    assemble_line_object("tail external\n");
     TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_HI20, g->text->relocations.buf[0].type);
-    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_I,
-                          g->text->relocations.buf[1].type);
+    TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
+    TEST_ASSERT_EQUAL_INT(R_RISCV_CALL_PLT, g->text->relocations.buf[0].type);
     bool err = false;
     TEST_ASSERT_EQUAL_INT(0x00000317,
                           LOAD(g, g->text->base, 4, &err));  // auipc t1, 0
@@ -1788,54 +1881,19 @@ void test_reloc_tail_external(void) {
         0x00030067, LOAD(g, g->text->base + 4, 4, &err));  // jalr x0, t1, 0
 }
 
-void test_reloc_call_rd_external(void) {
-    assemble_line_externs("call x5, external\n");
-    TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
-    bool err = false;
-    TEST_ASSERT_EQUAL_INT(0x00000297,
-                          LOAD(g, g->text->base, 4, &err));  // auipc t0, 0
-    TEST_ASSERT_EQUAL_INT(
-        0x000282e7, LOAD(g, g->text->base + 4, 4, &err));  // jalr t0, t0, 0
-}
-
 void test_reloc_la_combined_kinds(void) {
-    assemble_line_externs("la a0, external\n");
+    assemble_line_object("la a0, external\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_EXTERN,
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL,
                           g->text->relocations.buf[0].kind);
-    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_LOCAL_LABEL,
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_TEMP,
                           g->text->relocations.buf[1].kind);
-    TEST_ASSERT_EQUAL_INT(0, g->local_labels.len - 1);
-    TEST_ASSERT_EQUAL_INT(g->text->relocations.buf[1].local_label_idx,
-                          g->local_labels.len - 1);
-}
-
-// same symbol referenced twice shares the same extern index
-void test_reloc_extern_dedup(void) {
-    assemble_line_externs("j foo\nnop\nj foo\n");
-    TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(1, g->externs.len);
-    TEST_ASSERT_EQUAL_INT(g->text->relocations.buf[0].extern_idx,
-                          g->text->relocations.buf[1].extern_idx);
-    TEST_ASSERT_EQUAL_INT(0, g->text->relocations.buf[0].offset);
-    TEST_ASSERT_EQUAL_INT(8, g->text->relocations.buf[1].offset);
-}
-
-void test_reloc_distinct_externs(void) {
-    assemble_line_externs("j foo\nnop\nj bar\n");
-    TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(2, g->externs.len);
-    TEST_ASSERT_NOT_EQUAL(g->text->relocations.buf[0].extern_idx,
-                          g->text->relocations.buf[1].extern_idx);
 }
 
 void test_reloc_section_isolation(void) {
     // relocations in .text should not appear in .data and vice-versa
-    assemble_line_externs(
+    assemble_line_object(
         ".text\n"
         "j foo\n"
         ".data\n"
@@ -1847,33 +1905,54 @@ void test_reloc_section_isolation(void) {
     TEST_ASSERT_EQUAL_INT(R_RISCV_32, g->data->relocations.buf[0].type);
 }
 
-void test_reloc_cross_section_extern_shared(void) {
-    assemble_line_externs(
-        ".text\n"
-        "j shared\n"
-        ".data\n"
-        ".word shared\n");
+void test_pcrel_lo_external(void) {
+    assemble_line_object(
+        "l0: auipc a0, %pcrel_hi(external_label)\n"
+        "addi a0, a0, %pcrel_lo(l0)\n");
+
     TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(1, g->externs.len);
-    TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(1, g->data->relocations.len);
-    TEST_ASSERT_EQUAL_INT(g->text->relocations.buf[0].extern_idx,
-                          g->data->relocations.buf[0].extern_idx);
+    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
+
+    Relocation *hi = &g->text->relocations.buf[0];
+    Relocation *lo = &g->text->relocations.buf[1];
+
+    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_HI20, hi->type);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, hi->kind);
+    TEST_ASSERT_EQUAL_INT(0, hi->offset);
+
+    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_I, lo->type);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, lo->kind);
+}
+
+void test_pcrel_imm(void) {
+    assemble_line_object(
+        "L: auipc t0, %pcrel_hi(0x00400010)\n"
+        "addi t0, t0, %pcrel_lo(L)\n");
+    TEST_ASSERT_NULL(g->error);
+    TEST_ASSERT_EQUAL_INT(2, g->text->relocations.len);
+
+    Relocation *hi = &g->text->relocations.buf[0];
+    Relocation *lo = &g->text->relocations.buf[1];
+
+    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_HI20, hi->type);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, hi->kind);
+    TEST_ASSERT_EQUAL_INT(0x00400010, hi->addend);
+
+    TEST_ASSERT_EQUAL_INT(R_RISCV_PCREL_LO12_I, lo->type);
+    TEST_ASSERT_EQUAL_INT(RELOCATION_KIND_SYMBOL, lo->kind);
 }
 
 // a label defined in the same file should NOT generate a relocation
 void test_reloc_no_reloc_for_local_label(void) {
-    assemble_line_externs("j local\nlocal: nop\n");
+    assemble_line_object("j local\nlocal: nop\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(0, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(0, g->externs.len);
 }
 
 void test_reloc_la_local_no_reloc(void) {
-    assemble_line_externs("la a0, target\nnop\nnop\ntarget: nop\n");
+    assemble_line_object("la a0, target\nnop\nnop\ntarget: nop\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(0, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(0, g->externs.len);
     bool err = false;
     TEST_ASSERT_EQUAL_INT(0x00000517,
                           LOAD(g, g->text->base, 4, &err));  // auipc a0, 0
@@ -1886,12 +1965,11 @@ void test_reloc_disabled_when_externs_not_allowed(void) {
     TEST_ASSERT_NOT_NULL(g->error);
     TEST_ASSERT_EQUAL_STRING("Label not found", g->error);
     TEST_ASSERT_EQUAL_INT(0, g->text->relocations.len);
-    TEST_ASSERT_EQUAL_INT(0, g->externs.len);
 }
 
 void test_reloc_branch_offsets(void) {
     // branch at 4-byte boundary
-    assemble_line_externs("nop\nnop\nbeq a0, a1, ext\n");
+    assemble_line_object("nop\nnop\nbeq a0, a1, ext\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     TEST_ASSERT_EQUAL_INT(8, g->text->relocations.buf[0].offset);
@@ -1899,7 +1977,7 @@ void test_reloc_branch_offsets(void) {
 
 void test_reloc_c_j_offset(void) {
     // compressed jump at 2-byte boundary
-    assemble_line_externs("c.nop\nc.nop\nc.j ext\n");
+    assemble_line_object("c.nop\nc.nop\nc.j ext\n");
     TEST_ASSERT_NULL(g->error);
     TEST_ASSERT_EQUAL_INT(1, g->text->relocations.len);
     TEST_ASSERT_EQUAL_INT(4, g->text->relocations.buf[0].offset);
@@ -1908,7 +1986,7 @@ void test_reloc_c_j_offset(void) {
 }
 
 void test_reloc_externs_preserved_across_sections(void) {
-    assemble_line_externs(
+    assemble_line_object(
         ".data\n"
         ".word a\n"
         ".word b\n"
@@ -1916,11 +1994,6 @@ void test_reloc_externs_preserved_across_sections(void) {
         "j c\n"
         "j d\n");
     TEST_ASSERT_NULL(g->error);
-    TEST_ASSERT_EQUAL_INT(4, g->externs.len);
-    assert_extern(0, "a");
-    assert_extern(1, "b");
-    assert_extern(2, "c");
-    assert_extern(3, "d");
     TEST_ASSERT_EQUAL_INT(2, g->data->relocations.len);
     TEST_ASSERT_EQUAL_INT(0, g->data->relocations.buf[0].offset);
     TEST_ASSERT_EQUAL_INT(4, g->data->relocations.buf[1].offset);

@@ -99,22 +99,20 @@ typedef struct Section Section;
 typedef struct {
     Section *section;
     size_t offset;
-    size_t elf_stidx;
 } LocalLabel;
 
 typedef enum RelocationKind {
-    RELOCATION_KIND_EXTERN,
-    RELOCATION_KIND_LOCAL_LABEL
+    RELOCATION_KIND_SYMBOL,
+    RELOCATION_KIND_TEMP,
 } RelocationKind;
 
 typedef struct {
     RelocationKind kind;
     u32 offset;
+    const char *sym;
+    size_t sym_len;
+    size_t local_label_ldx;
     i32 addend;
-    union {
-        size_t extern_idx;
-        size_t local_label_idx;
-    };
     u32 type;
 } Relocation;
 ARES_ARRAY_TYPE(Relocation);
@@ -154,7 +152,7 @@ typedef struct AresState AresState;
 typedef const char *DeferredInsnCb(AresState *g, Parser *p, const char *opcode,
                                    size_t opcode_len);
 typedef const char *DeferredInsnReloc(AresState *g, const char *sym,
-                                      size_t sym_len);
+                                      size_t sym_len, i32 value);
 
 typedef struct DeferredInsn {
     Parser p;
@@ -205,7 +203,7 @@ extern const char *const CSR_NAMES[];
 struct AresState;
 typedef struct AresState AresState;
 
-void assemble(AresState *g, const char *str, size_t len, bool allow_externs);
+void assemble(AresState *g, const char *str, size_t len, bool object);
 void emulate(AresState *g);
 bool resolve_symbol(AresState *g, const char *sym, size_t sym_len, bool global,
                     u32 *addr, Section **sec);

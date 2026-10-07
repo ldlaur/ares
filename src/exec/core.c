@@ -7,8 +7,15 @@
 #include "ares/elf.h"
 #include "ares/emulate.h"
 
-// NOTE: this may seem like it can be static, but it's used elsewhere (like in
-// cli.c)
+// IMPORTANT: currently the reloc gen only generates ones that
+// cannot be resolved by locally.
+// however, when support for linker relaxation is added
+// the ELF must contain even local relocs
+// since when the linker
+// shortens an instruction the pcrel offset will change even between
+// entirely local labels
+// remember this whenever implementing relax!
+
 const char *const REGISTER_NAMES[] = {
     "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "fp", "s1", "a0",
     "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
@@ -578,192 +585,185 @@ void asm_emit_16(AresState *g, u32 inst, int linenum) {
     asm_emit_byte(g, inst >> 8, linenum);
 }
 
-static size_t get_extern(AresState *g, const char *sym, size_t sym_len) {
-    for (size_t i = 0; i < ARES_ARRAY_LEN(&g->externs); i++) {
-        if (ARES_ARRAY_GET(&g->externs, i)->len == sym_len &&
-            0 == memcmp(sym, ARES_ARRAY_GET(&g->externs, i)->symbol, sym_len)) {
-            return i;
-        }
+static void defer_insn(AresState *g, Parser *orig, DeferredInsnCb *cb,
+                       const char *opcode, size_t opcode_len) {
+    DeferredInsn *insn = ARES_ARRAY_PUSH(&g->deferred_insn);
+    insn->emit_idx = g->section->emit_idx;
+    insn->p = *orig;
+    insn->cb = cb;
+    insn->opcode = opcode;
+    insn->opcode_len = opcode_len;
+    insn->section = g->section;
+}
+
+// NOTE: per the psABI spec it must be in the same section:
+// The R_RISCV_PCREL_LO12_I or R_RISCV_PCREL_LO12_S relocations contain a label
+// pointing to an instruction in the same section with a high-part relocation
+// entry that points to the target symbol.
+static PcrelHiReloc *pcrel_hi_find(AresState *g, Section *section, u32 addr) {
+    for (size_t i = 0; i < g->pcrel_hi_relocs.len; i++) {
+        PcrelHiReloc *r = &g->pcrel_hi_relocs.buf[i];
+        if (r->section == section && r->addr == addr) return r;
     }
-
-    Extern *e = ARES_ARRAY_PUSH(&g->externs);
-    e->symbol = sym;
-    e->len = sym_len;
-    return g->externs.len - 1;
-}
-
-const char *reloc_c_j(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->extern_idx = extern_idx;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_RVC_JUMP;
     return NULL;
 }
 
-static const char *reloc_c_branch(AresState *g, const char *sym,
-                                  size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->extern_idx = extern_idx;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_RVC_BRANCH;
-    return NULL;
+static PcrelHiReloc *pcrel_hi_site(AresState *g, const char *sym,
+                                   size_t sym_len, u32 value) {
+    Section *section = g->section;
+    u32 addr = section->base + section->emit_idx;
+
+    PcrelHiReloc *r = pcrel_hi_find(g, section, addr);
+    if (r) return r;
+
+    size_t local_label_idx = g->local_labels.len;
+    LocalLabel *lbl = ARES_ARRAY_PUSH(&g->local_labels);
+    lbl->section = section;
+    lbl->offset = section->emit_idx;
+
+    r = ARES_ARRAY_PUSH(&g->pcrel_hi_relocs);
+    *r = (PcrelHiReloc){
+        .section = section,
+        .addr = addr,
+        .sym = sym,
+        .sym_len = sym_len,
+        .value = value,
+        .local_label_idx = local_label_idx,
+    };
+    return r;
 }
 
-const char *reloc_branch(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_BRANCH;
-    return NULL;
+static bool pcrel_split(u32 target, u32 pc, i32 *hi, i32 *lo) {
+    u32 delta = target - pc;
+    i32 l = sign_extend_12(delta);
+    if (lo) *lo = l;
+    if (hi) *hi = (i32)((delta - (u32)l) >> 12);
+    return true;
 }
 
-const char *reloc_jal(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
+Relocation *reloc_push(AresState *g, RelocationKind kind, int type, u32 offset,
+                       const char *sym, size_t sym_len, i32 addend,
+                       size_t local_label_idx) {
     Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_JAL;
-    return NULL;
+    r->kind = kind;
+    r->type = type;
+    r->offset = offset;
+    r->sym = sym;
+    r->sym_len = sym_len;
+    r->addend = addend;
+    r->local_label_ldx = local_label_idx;
+    return r;
 }
 
-const char *reloc_hi20(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_HI20;
-    return NULL;
-}
-
-const char *reloc_lo12i(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_LO12_I;
-    return NULL;
-}
-
-const char *reloc_lo12s(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_LO12_S;
-    return NULL;
-}
-
-const char *reloc_hi20lo12i(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_HI20;
-
-    r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx + 4;
-    r->type = R_RISCV_LO12_I;
-    return NULL;
-}
-
-const char *reloc_hi20lo12s(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_HI20;
-
-    r = ARES_ARRAY_PUSH(&g->section->relocations);
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx + 4;
-    r->type = R_RISCV_LO12_S;
-    return NULL;
-}
-
-const char *reloc_abs32(AresState *g, const char *sym, size_t sym_len) {
-    size_t extern_idx = get_extern(g, sym, sym_len);
-    Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
-
-    r->extern_idx = extern_idx;
-    r->addend = 0;
-    r->offset = g->section->emit_idx;
-    r->type = R_RISCV_32;
+static const char *reloc_pcrel_hi20(AresState *g, const char *sym,
+                                    size_t sym_len, i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_PCREL_HI20,
+               g->section->emit_idx, sym, sym_len, addend, 0);
     return NULL;
 }
 
 static const char *reloc_pcrel_hi20lo12i(AresState *g, const char *sym,
-                                         size_t sym_len) {
-    size_t local_label_idx = ARES_ARRAY_LEN(&g->local_labels);
-    LocalLabel *lbl = ARES_ARRAY_PUSH(&g->local_labels);
-    lbl->section = g->section;
-    lbl->offset = g->section->emit_idx;
+                                         size_t sym_len, i32 addend) {
+    // checked empirically with clang and gcc that this is accepted
+    // L: la a0, external_sym
+    // addi t0, t0, %pcrel_lo(L)
+    // so add a pcrel entry too
+    PcrelHiReloc *r = pcrel_hi_site(g, sym, sym_len, addend);
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_PCREL_HI20,
+               g->section->emit_idx, sym, sym_len, addend, 0);
+    // important: addend is 0 here!
+    reloc_push(g, RELOCATION_KIND_TEMP, R_RISCV_PCREL_LO12_I,
+               g->section->emit_idx + 4, NULL, 0, 0, r->local_label_idx);
+    return NULL;
+}
 
-    Relocation *r_hi = ARES_ARRAY_PUSH(&g->section->relocations);
-    r_hi->kind = RELOCATION_KIND_EXTERN;
-    r_hi->extern_idx = get_extern(g, sym, sym_len);
-    r_hi->addend = 0;
-    r_hi->offset = g->section->emit_idx;
-    r_hi->type = R_RISCV_PCREL_HI20;
+const char *reloc_c_j(AresState *g, const char *sym, size_t sym_len,
+                      i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_RVC_JUMP,
+               g->section->emit_idx, sym, sym_len, addend, 0);
+    return NULL;
+}
 
-    Relocation *r_lo = ARES_ARRAY_PUSH(&g->section->relocations);
-    r_lo->kind = RELOCATION_KIND_LOCAL_LABEL;
-    r_lo->local_label_idx = local_label_idx;
-    r_lo->addend = 0;
-    r_lo->offset = g->section->emit_idx + 4;
-    r_lo->type = R_RISCV_PCREL_LO12_I;
+static const char *reloc_c_branch(AresState *g, const char *sym, size_t sym_len,
+                                  i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_RVC_BRANCH,
+               g->section->emit_idx, sym, sym_len, addend, 0);
+    return NULL;
+}
+
+const char *reloc_branch(AresState *g, const char *sym, size_t sym_len,
+                         i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_BRANCH, g->section->emit_idx,
+               sym, sym_len, addend, 0);
+    return NULL;
+}
+
+const char *reloc_jal(AresState *g, const char *sym, size_t sym_len,
+                      i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_JAL, g->section->emit_idx,
+               sym, sym_len, addend, 0);
+    return NULL;
+}
+
+const char *reloc_hi20(AresState *g, const char *sym, size_t sym_len,
+                       i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_HI20, g->section->emit_idx,
+               sym, sym_len, addend, 0);
 
     return NULL;
 }
 
-static const char *reloc_pcrel_hi20(AresState *g, const char *sym,
-                                    size_t sym_len) {
-    Relocation *r_hi = ARES_ARRAY_PUSH(&g->section->relocations);
-    r_hi->kind = RELOCATION_KIND_EXTERN;
-    r_hi->extern_idx = get_extern(g, sym, sym_len);
-    r_hi->addend = 0;
-    r_hi->offset = g->section->emit_idx;
-    r_hi->type = R_RISCV_PCREL_HI20;
+const char *reloc_lo12i(AresState *g, const char *sym, size_t sym_len,
+                        i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_LO12_I, g->section->emit_idx,
+               sym, sym_len, addend, 0);
     return NULL;
 }
 
-static const char *reloc_pcrel_lo12i(AresState *g, const char *sym,
-                                     size_t sym_len) {
-    Relocation *r_lo = ARES_ARRAY_PUSH(&g->section->relocations);
-    r_lo->kind = RELOCATION_KIND_EXTERN;
-    r_lo->extern_idx = get_extern(g, sym, sym_len);
-    r_lo->addend = 0;
-    r_lo->offset = g->section->emit_idx;
-    r_lo->type = R_RISCV_PCREL_LO12_I;
+const char *reloc_lo12s(AresState *g, const char *sym, size_t sym_len,
+                        i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_LO12_S, g->section->emit_idx,
+               sym, sym_len, addend, 0);
     return NULL;
 }
 
-static const char *reloc_pcrel_lo12s(AresState *g, const char *sym,
-                                     size_t sym_len) {
-    Relocation *r_lo = ARES_ARRAY_PUSH(&g->section->relocations);
-    r_lo->kind = RELOCATION_KIND_EXTERN;
-    r_lo->extern_idx = get_extern(g, sym, sym_len);
-    r_lo->addend = 0;
-    r_lo->offset = g->section->emit_idx;
-    r_lo->type = R_RISCV_PCREL_LO12_S;
+const char *reloc_hi20lo12i(AresState *g, const char *sym, size_t sym_len,
+                            i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_HI20, g->section->emit_idx,
+               sym, sym_len, addend, 0);
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_LO12_I,
+               g->section->emit_idx + 4, sym, sym_len, addend, 0);
     return NULL;
+}
+
+const char *reloc_hi20lo12s(AresState *g, const char *sym, size_t sym_len,
+                            i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_HI20, g->section->emit_idx,
+               sym, sym_len, addend, 0);
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_LO12_S,
+               g->section->emit_idx + 4, sym, sym_len, addend, 0);
+    return NULL;
+}
+
+const char *reloc_abs32(AresState *g, const char *sym, size_t sym_len,
+                        i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_32, g->section->emit_idx, sym,
+               sym_len, addend, 0);
+
+    return NULL;
+}
+
+const char *reloc_call_plt(AresState *g, const char *sym, size_t sym_len,
+                           i32 addend) {
+    reloc_push(g, RELOCATION_KIND_SYMBOL, R_RISCV_CALL_PLT,
+               g->section->emit_idx, sym, sym_len, addend, 0);
+    return NULL;
+}
+
+static bool reloc_is_pcrel(DeferredInsnReloc *r) {
+    return r == reloc_branch || r == reloc_jal || r == reloc_c_j ||
+           r == reloc_c_branch || r == reloc_call_plt ||
+           r == reloc_pcrel_hi20 || r == reloc_pcrel_hi20lo12i;
 }
 
 const char *label(AresState *g, Parser *p, Parser *orig, DeferredInsnCb *cb,
@@ -776,27 +776,33 @@ const char *label(AresState *g, Parser *p, Parser *orig, DeferredInsnCb *cb,
     parse_ident(p, &target, &target_len);
     if (target_len == 0) return "No label";
 
+    bool is_pcrel_hi =
+        reloc == reloc_pcrel_hi20 || reloc == reloc_pcrel_hi20lo12i;
+
+    if (is_pcrel_hi) pcrel_hi_site(g, target, target_len, 0);
+
     for (size_t i = 0; i < ARES_ARRAY_LEN(&g->labels); i++) {
         if (str_eq_2(ARES_ARRAY_GET(&g->labels, i)->txt,
                      ARES_ARRAY_GET(&g->labels, i)->len, target, target_len)) {
-            *out_addr = ARES_ARRAY_GET(&g->labels, i)->addr;
+            LabelData *d = ARES_ARRAY_GET(&g->labels, i);
+            // if the label is in another section, still generate a relocation
+            // NOTE: this will need to change when we support linker relaxation
+            // meanwhile absolute addresses will always be relocated
+            if (g->object &&
+                (!reloc_is_pcrel(reloc) || d->section != g->section))
+                break;
+            *out_addr = d->addr;
             return NULL;
         }
     }
 
-    if (g->in_fixup && (!reloc || !g->allow_externs)) return "Label not found";
+    if (g->in_fixup && !g->object) return "Label not found";
     if (g->in_fixup) {
         *out_addr = 0;
         *later = true;
-        return reloc(g, target, target_len);
+        return reloc(g, target, target_len, 0);
     }
-    DeferredInsn *insn = ARES_ARRAY_PUSH(&g->deferred_insn);
-    insn->emit_idx = g->section->emit_idx;
-    insn->p = *orig;
-    insn->cb = cb;
-    insn->opcode = opcode;
-    insn->opcode_len = opcode_len;
-    insn->section = g->section;
+    defer_insn(g, orig, cb, opcode, opcode_len);
     *later = true;
     return NULL;
 }
@@ -823,8 +829,6 @@ const char *parse_modifier_hi(AresState *g, Parser *p, Parser orig,
                               size_t opcode_len, i32 *simm) {
     const char *modifier;
     size_t modifier_len;
-    u32 addr;
-    i32 num;
     parse_ident(p, &modifier, &modifier_len);
     if (!consume_if(p, '(')) return "Expected (";
     DeferredInsnReloc *reloc = NULL;
@@ -832,11 +836,87 @@ const char *parse_modifier_hi(AresState *g, Parser *p, Parser orig,
     else if (str_eq_case(modifier, modifier_len, "pcrel_hi"))
         reloc = reloc_pcrel_hi20;
     else return "Invalid modifier";
+    bool later;
 
+    if (reloc == reloc_pcrel_hi20) {
+        i32 num;
+        u32 addr;
+        if (parse_numeric(p, &num)) {
+            addr = num;
+            if (!consume_if(p, ')')) return "Expected )";
+            pcrel_hi_site(g, NULL, 0, addr);
+
+            // if we aren't object, we always know current PC
+            if (!g->object) {
+                i32 hi = 0, lo = 0;
+                if (!pcrel_split(addr, g->section->base + g->section->emit_idx,
+                                 &hi, &lo))
+                    return "PC-relative target out of range";
+                *simm = hi;
+                return NULL;
+            }
+
+            // if we are object, we never know current PC
+            Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
+            *r = (Relocation){
+                .kind = RELOCATION_KIND_SYMBOL,
+                .sym = NULL,
+                .sym_len = 0,
+                .addend = num,
+                .offset = g->section->emit_idx,
+                .type = R_RISCV_PCREL_HI20,
+            };
+            *simm = 0;
+            return NULL;
+        } else {
+            const char *sym;
+            size_t sym_len;
+            parse_ident(p, &sym, &sym_len);
+            if (sym_len == 0) return "No label";
+            if (!consume_if(p, ')')) return "Expected )";
+            pcrel_hi_site(g, sym, sym_len, 0);
+            if (!g->in_fixup) {
+                defer_insn(g, &orig, cb, opcode, opcode_len);
+                *simm = 0;
+                return NULL;
+            }
+            // when reaching this, all symbols are resolved
+            // (it's second pass)
+            u32 target_addr;
+            Section *section;
+            bool found =
+                resolve_symbol(g, sym, sym_len, false, &target_addr, &section);
+            // if it's section-local no need to generate a reloc
+            if (found && (section == g->section || !g->object)) {
+                i32 hi = 0, lo = 0;
+                if (!pcrel_split(target_addr,
+                                 g->section->base + g->section->emit_idx, &hi,
+                                 &lo))
+                    return "PC-relative target out of range";
+                *simm = hi;
+                return NULL;
+            }
+            if (!g->object) return "Label not found";
+
+            Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
+            *r = (Relocation){
+                .kind = RELOCATION_KIND_SYMBOL,
+                .sym = sym,
+                .sym_len = sym_len,
+                .addend = 0,
+                .offset = g->section->emit_idx,
+                .type = R_RISCV_PCREL_HI20,
+            };
+            *simm = 0;
+            return NULL;
+        }
+    }
+
+    u32 addr;
+    i32 num;
     if (parse_numeric(p, &num)) {
-        addr = num;
+        addr = (u32)num;
     } else {
-        bool later;
         const char *err =
             label(g, p, &orig, cb, opcode, opcode_len, &addr, &later, reloc);
         if (err) return err;
@@ -846,13 +926,9 @@ const char *parse_modifier_hi(AresState *g, Parser *p, Parser orig,
             return NULL;
         }
     }
+
     if (!consume_if(p, ')')) return "Expected )";
-    if (reloc == reloc_pcrel_hi20) {
-        *ARES_ARRAY_PUSH(&g->pcrel_hi_relocs) = (PcrelHiReloc){
-            .label_addr = g->section->emit_idx + g->section->base,
-            .dest_addr = addr};
-        addr -= g->section->emit_idx + g->section->base;
-    }
+
     i32 lo = sign_extend_12(addr);
     u32 hi = (addr - (u32)lo) >> 12;
     *simm = hi;
@@ -864,19 +940,94 @@ const char *parse_modifier_lo(AresState *g, Parser *p, Parser orig, bool is_i,
                               size_t opcode_len, i32 *simm) {
     const char *modifier;
     size_t modifier_len;
-    u32 addr;
-    i32 num;
     parse_ident(p, &modifier, &modifier_len);
     if (!consume_if(p, '(')) return "Expected (";
-    DeferredInsnReloc *reloc = NULL;
+
+    bool pcrel = str_eq_case(modifier, modifier_len, "pcrel_lo");
+    if (pcrel) {
+        i32 num;
+        if (parse_numeric(p, &num)) {
+            return "Absolute pcrel_lo not supported";
+        } else {
+            const char *sym;
+            size_t sym_len;
+            parse_ident(p, &sym, &sym_len);
+            if (sym_len == 0) return "No label";
+            if (!consume_if(p, ')')) return "Expected )";
+            if (!g->in_fixup) {
+                defer_insn(g, &orig, cb, opcode, opcode_len);
+                *simm = 0;
+                return NULL;
+            }
+            // when reaching this, all symbols are resolved
+
+            // NOTE: in case of a missing hi
+            // llvm's assembler errors out at the assembler
+            // while gas assembles it fine, but fails at the linker
+            // psABI just says that hi and lo have to be in the same section
+            // and the common interpetation is that they have to be in the same
+            // *input* section
+            // that is, file1.o:.text and file2.o:.text are different sections
+            // despite being merged
+            // we follow the more informative llvm as behavior
+            u32 hi_addr;
+            Section *hi_section;
+            bool hi_found =
+                resolve_symbol(g, sym, sym_len, false, &hi_addr, &hi_section);
+            if (!hi_found) return "Corresponding hi label is not in this file";
+            // FIX: enforce in both modes, so flat and object builds agree
+            if (hi_section != g->section)
+                return "%pcrel_lo label must be in the same section";
+            // FIX: look up in the label's own section (equal to g->section
+            // here)
+            PcrelHiReloc *rel = pcrel_hi_find(g, hi_section, hi_addr);
+            if (!rel) return "Label does not point at a %pcrel_hi";
+
+            bool without_reloc = false;
+            u32 final_addr = 0;
+            if (rel->sym) {
+                Section *low_section;
+                bool low_found =
+                    resolve_symbol(g, rel->sym, rel->sym_len, false,
+                                   &final_addr, &low_section);
+                without_reloc =
+                    low_found && (low_section == g->section || !g->object);
+            } else {
+                final_addr = rel->value;
+                // if object, always generate a reloc for abs
+                // since we do not know where the code will end up
+                without_reloc = !g->object;
+            }
+            if (without_reloc) {
+                i32 hi = 0, lo = 0;
+                if (!pcrel_split(final_addr, hi_addr, &hi, &lo))
+                    return "PC-relative target out of range";
+                *simm = lo;
+                return NULL;
+            }
+            if (!g->object) return "%pcrel_hi target is not defined";
+            Relocation *r = ARES_ARRAY_PUSH(&g->section->relocations);
+            *r = (Relocation){
+                .kind = RELOCATION_KIND_SYMBOL,
+                .sym = sym,
+                .sym_len = sym_len,
+                .addend = 0,
+                .offset = g->section->emit_idx,
+                .type = is_i ? R_RISCV_PCREL_LO12_I : R_RISCV_PCREL_LO12_S,
+            };
+            *simm = 0;
+            return NULL;
+        }
+    }
+
+    DeferredInsnReloc *reloc;
     if (str_eq_case(modifier, modifier_len, "lo"))
         reloc = is_i ? reloc_lo12i : reloc_lo12s;
-    else if (str_eq_case(modifier, modifier_len, "pcrel_lo"))
-        reloc = is_i ? reloc_pcrel_lo12i : reloc_pcrel_lo12s;
     else return "Invalid modifier";
-
+    u32 addr;
+    i32 num;
     if (parse_numeric(p, &num)) {
-        addr = num;
+        addr = (u32)num;
     } else {
         bool later;
         const char *err =
@@ -889,37 +1040,6 @@ const char *parse_modifier_lo(AresState *g, Parser *p, Parser orig, bool is_i,
         }
     }
     if (!consume_if(p, ')')) return "Expected )";
-    if (reloc == reloc_pcrel_lo12i || reloc == reloc_pcrel_lo12s) {
-        bool found = false;
-        for (size_t i = 0; i < g->pcrel_hi_relocs.len; i++) {
-            if (g->pcrel_hi_relocs.buf[i].label_addr == addr) {
-                addr = g->pcrel_hi_relocs.buf[i].dest_addr - addr;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            if (!g->in_fixup) {
-                DeferredInsn *insn = ARES_ARRAY_PUSH(&g->deferred_insn);
-                insn->emit_idx = g->section->emit_idx;
-                insn->p = orig;
-                insn->cb = cb;
-                insn->opcode = opcode;
-                insn->opcode_len = opcode_len;
-                insn->section = g->section;
-                *simm = 0;
-                return NULL;
-            } else {
-                // TODO: this also includes places where it is in a weird order
-                // like this:
-                // addi a0, a0, %pcrel_lo(l0)
-                // l0:
-                // auipc a0, %pcrel_hi(label)
-                // label:
-                return "Invalid pcrel label";
-            }
-        }
-    }
     *simm = sign_extend_12(addr);
     return NULL;
 }
@@ -1259,7 +1379,7 @@ const char *handle_call_tail(AresState *g, Parser *p, const char *opcode,
 
     u32 addr;
     const char *err = label(g, p, &orig, handle_call_tail, opcode, opcode_len,
-                            &addr, &later, reloc_pcrel_hi20lo12i);
+                            &addr, &later, reloc_call_plt);
 
     if (err) return err;
 
@@ -1282,6 +1402,7 @@ const char *handle_call_tail(AresState *g, Parser *p, const char *opcode,
 
 const char *handle_jump_reg(AresState *g, Parser *p, const char *opcode,
                             size_t opcode_len) {
+    Parser orig = *p;
     int d, s;
     i32 simm;
 
@@ -1305,6 +1426,16 @@ const char *handle_jump_reg(AresState *g, Parser *p, const char *opcode,
             if ((s = parse_reg(p)) == -1) return "Invalid rs";
             skip_trailing(p);
             if (!consume_if(p, ')')) return "Expected )";
+        } else if (consume_if(p, '%')) {  // %pcrel_lo(rs)
+            const char *err = parse_modifier_lo(
+                g, p, orig, true, handle_jump_reg, opcode, opcode_len, &simm);
+            if (err) return err;
+            skip_trailing(p);
+            if (!consume_if(p, '(')) return "Expected (";
+            skip_trailing(p);
+            if ((s = parse_reg(p)) == -1) return "Invalid rs";
+            skip_trailing(p);
+            if (!consume_if(p, ')')) return "Expected )";
         } else if (consume_if(p, '(')) {  // (rs)
             simm = 0;
             skip_trailing(p);
@@ -1315,7 +1446,12 @@ const char *handle_jump_reg(AresState *g, Parser *p, const char *opcode,
             skip_trailing(p);
             if (consume_if(p, ',')) {  // rd, rs, simm
                 skip_trailing(p);
-                if (!parse_numeric(p, &simm)) return "Invalid immediate";
+                if (consume_if(p, '%')) {
+                    const char *err =
+                        parse_modifier_lo(g, p, orig, true, handle_jump_reg,
+                                          opcode, opcode_len, &simm);
+                    if (err) return err;
+                } else if (!parse_numeric(p, &simm)) return "Invalid immediate";
             } else {  // rd, rs
                 simm = 0;
             }
@@ -1403,11 +1539,11 @@ const char *handle_la(AresState *g, Parser *p, const char *opcode,
     const char *err = label(g, p, &orig, handle_la, opcode, opcode_len, &addr,
                             &later, reloc_pcrel_hi20lo12i);
     if (err) return err;
-    i32 pc = (i32)(g->section->emit_idx + g->section->base);
-    i32 simm = later ? 0 : (i32)(addr - (u32)pc);
 
-    i32 lo = sign_extend_12((u32)simm);
-    u32 hi = ((u32)simm - (u32)lo) >> 12;
+    i32 hi = 0, lo = 0;
+    if (!later &&
+        !pcrel_split(addr, g->section->base + g->section->emit_idx, &hi, &lo))
+        return "PC-relative target out of range";
 
     asm_emit(g, AUIPC(d, hi), p->startline);
     asm_emit(g, ADDI(d, d, lo), p->startline);
@@ -2158,14 +2294,7 @@ const char *parse_word(AresState *g, Parser *p, const char *opcode,
     Parser orig = *p;
 
     if (!g->in_fixup) {
-        DeferredInsn *insn = ARES_ARRAY_PUSH(&g->deferred_insn);
-        insn->emit_idx = g->section->emit_idx;
-        insn->p = orig;
-        insn->cb = parse_word;
-        insn->opcode = opcode;
-        insn->opcode_len = opcode_len;
-        insn->section = g->section;
-
+        defer_insn(g, &orig, parse_word, opcode, opcode_len);
         bool first = true;
         while (true) {
             skip_whitespace(p);
@@ -2215,10 +2344,9 @@ const char *parse_word(AresState *g, Parser *p, const char *opcode,
    NOTE: input must be normalized to LF line endings before calling assemble()
 */
 
-export void assemble(AresState *g, const char *txt, size_t s,
-                     bool allow_externs) {
+export void assemble(AresState *g, const char *txt, size_t s, bool object) {
     memset(g, 0, sizeof(*g));
-    g->allow_externs = allow_externs;
+    g->object = object;
     g->in_fixup = false;
 
     callsan_init(g);

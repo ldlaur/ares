@@ -181,7 +181,7 @@ static u8 *read_contents(FILE *file, size_t *size, char **error) {
     return contents;
 }
 
-static char *assemble_from_file(const char *src_path, bool allow_externs) {
+static char *assemble_from_file(const char *src_path, bool object) {
     FILE *f = fopen(src_path, "rb");
 
     if (!f) {
@@ -200,7 +200,7 @@ static char *assemble_from_file(const char *src_path, bool allow_externs) {
         return NULL;
     }
     convert_endings(text, &s);
-    assemble(g, text, s, allow_externs);
+    assemble(g, text, s, object);
 
     if (g->error) {
         fprintf(stderr, "assembler: line %u %s\n", g->error_line, g->error);

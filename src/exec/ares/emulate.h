@@ -52,10 +52,15 @@ void emulator_interrupt_set_pending(AresState *g, u32 intno);
 void emulator_interrupt_clear_pending(AresState *g, u32 intno);
 size_t disassemble(u32 inst, char *buf, size_t buflen);
 
-typedef struct PcrelHiReloc {
-    u32 label_addr;
-    u32 dest_addr;
+typedef struct {
+    Section *section;
+    u32 addr;
+    u32 value;
+    const char *sym;
+    size_t sym_len;
+    size_t local_label_idx;
 } PcrelHiReloc;
+
 ARES_ARRAY_TYPE(PcrelHiReloc);
 
 typedef struct {
@@ -91,7 +96,7 @@ typedef struct AresState {
     u32 runtime_error_params[2];
     Error runtime_error_type;
 
-    bool allow_externs;
+    bool object;
 
     u32 reg_bitmap;
     u32 reg_bitmap_ever_written;

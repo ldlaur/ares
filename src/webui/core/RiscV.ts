@@ -54,7 +54,7 @@ interface WasmExports {
 
   // Core functions
   emulate: (g: number) => void;
-  assemble: (g: number, offset: number, len: number, allow_externs: boolean) => void;
+  assemble: (g: number, offset: number, len: number, object: boolean) => void;
   pc_to_label: (g: number, pc: number) => void;
   get_addr_from_line: (g: number, address: number) => void;
   get_line_from_pc: (g: number) => number;
